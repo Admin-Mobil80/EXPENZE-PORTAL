@@ -1,0 +1,64 @@
+name: Deploy portal
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Required for OIDC: id-token lets the job ask GitHub for a signed token that
+# AWS trades for temporary credentials. No access keys are stored anywhere.
+permissions:
+  id-token: write
+  contents: read
+
+# One deploy at a time. Two overlapping runs would race the sync and could
+# leave the bucket holding a mix of two commits.
+concurrency:
+  group: deploy-portal
+  cancel-in-progress: false
+
+env:
+  # The buckets and distributions are in us-east-1: CloudFront certificates may
+  # only be issued there, so both site stacks live there too. The backend is in
+  # ap-southeast-1 and is not touched by this workflow.
+  AWS_REGION: us-east-1
+  DEPLOY_ROLE_ARN: arn:aws:iam::231427841372:role/expenze-github-deploy
+  BUCKET: expenze-site-231427841372
+  DISTRIBUTION_ID: E3F4MLCVNAXPPE
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # No build step and nothing fingerprinted: this repo is three hand-written
+      # HTML files, so every one of them is an entry point and none may be
+      # cached. A browser holding app.html keeps running the previous release
+      # even after an invalidation, which is how a reviewer ends up deciding
+      # claims against rules that changed this morning.
+      - name: Sync
+        run: |
+          aws s3 sync . "s3://$BUCKET/" \
+            --delete \
+            --exclude ".git/*" --exclude ".github/*" \
+            --exclude ".gitignore" --exclude "README.md" --exclude ".DS_Store" \
+            --cache-control "no-cache, must-revalidate" \
+            --content-type "text/html; charset=utf-8"
+
+      # Waited on, not fired and forgotten. A green tick while the old files are
+      # still being served teaches everybody to distrust the tick.
+      - name: Invalidate CloudFront
+        run: |
+          ID=$(aws cloudfront create-invalidation \
+            --distribution-id "$DISTRIBUTION_ID" \
+            --paths "/*" --query 'Invalidation.Id' --output text)
+          echo "Invalidation $ID created; waiting for it to complete."
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "$DISTRIBUTION_ID" --id "$ID"
+          echo "https://expenze.ai is serving ${GITHUB_SHA:0:7}."
