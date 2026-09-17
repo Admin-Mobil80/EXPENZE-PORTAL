@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Expenze</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root { --paper:#F7F6F2; --surface:#FFFFFF; --surface-2:#EFEEE8; --ink:#171A18;
+        --ink-2:#3B403C; --muted:#6E736C; --rule:#DDDCD4; --rule-firm:#C6C5BB;
+        --brand:#1D4E3A; --brand-soft:#E3EDE6; --brand-deep:#123326; --flag:#96610F;
+        --bad:#9E2F27; --on-brand:#F7F6F2; --radius:4px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper:#121412; --surface:#1A1D1A; --surface-2:#222621; --ink:#EDEFE9;
+  --ink-2:#C4C9C1; --muted:#8C918A; --rule:#31352F; --rule-firm:#444943;
+  --brand:#7FC49F; --brand-soft:#16301F; --brand-deep:#A9DCC0; --flag:#DBA65C;
+  --bad:#E08A82; --on-brand:#0F1F16; } }
+:root[data-theme="dark"] { --paper:#121412; --surface:#1A1D1A; --surface-2:#222621;
+  --ink:#EDEFE9; --ink-2:#C4C9C1; --muted:#8C918A; --rule:#31352F; --rule-firm:#444943;
+  --brand:#7FC49F; --brand-soft:#16301F; --brand-deep:#A9DCC0; --flag:#DBA65C;
+  --bad:#E08A82; --on-brand:#0F1F16; }
+/* Views differ in height, so some need a scrollbar and some do not. Without a
+   reserved gutter the page width changes by the scrollbar's width every time
+   that flips - which is the sideways "jump" when switching tabs. */
+html { scrollbar-gutter: stable; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); min-height:100vh;
+  font-family:"Archivo",ui-sans-serif,system-ui,sans-serif; line-height:1.55;
+  display:grid; place-items:center; padding:28px 22px; -webkit-font-smoothing:antialiased; }
+main { width:100%; max-width:27rem; }
+.topnav { margin-bottom:14px; font-size:.8rem; }
+.topnav a { color:var(--muted); text-decoration:none; }
+.topnav a:hover { color:var(--ink); text-decoration:underline; }
+.logo { display:flex; align-items:baseline; justify-content:center; gap:2px;
+  font-family:"Fraunces",Georgia,serif; font-size:1.5rem; font-weight:700;
+  letter-spacing:-.03em; margin-bottom:5px; text-decoration:none; color:var(--ink); }
+.logo:hover { text-decoration:underline; text-underline-offset:3px; }
+footer .sep { margin:0 7px; color:var(--rule-firm); }
+.logo .dot { color:var(--brand); }
+.tagline { text-align:center; color:var(--muted); font-size:.83rem; margin:0 0 20px; }
+.card { background:var(--surface); border:1px solid var(--rule-firm);
+  border-radius:var(--radius); padding:24px; }
+h1 { font-family:"Fraunces",Georgia,serif; font-size:1.3rem; font-weight:600;
+  letter-spacing:-.02em; margin:0 0 5px; }
+.sub { color:var(--muted); font-size:.85rem; margin:0 0 18px; }
+.sub strong { color:var(--ink-2); }
+label { display:block; font-size:.72rem; text-transform:uppercase; letter-spacing:.08em;
+  color:var(--muted); font-weight:600; margin-bottom:6px; }
+input[type=email] { font:inherit; font-size:.94rem; padding:10px 12px; width:100%;
+  border:1px solid var(--rule-firm); border-radius:var(--radius);
+  background:var(--paper); color:var(--ink); }
+:is(input,button,a):focus-visible { outline:2px solid var(--brand); outline-offset:1px; }
+.cta { font:inherit; font-size:.95rem; font-weight:600; padding:11px 18px; width:100%;
+  margin-top:14px; border-radius:var(--radius); border:1px solid var(--brand);
+  background:var(--brand); color:var(--on-brand); cursor:pointer; }
+.cta:hover:not(:disabled) { background:var(--brand-deep); border-color:var(--brand-deep); }
+.cta:disabled { opacity:.5; cursor:not-allowed; }
+.otp { display:flex; gap:8px; justify-content:space-between; }
+.otp input { font-family:"IBM Plex Mono",monospace; font-size:1.4rem; font-weight:600;
+  text-align:center; width:100%; padding:11px 0; border:1px solid var(--rule-firm);
+  border-radius:var(--radius); background:var(--paper); color:var(--ink);
+  -moz-appearance:textfield; }
+.otp input::-webkit-outer-spin-button, .otp input::-webkit-inner-spin-button {
+  -webkit-appearance:none; margin:0; }
+.otp input.filled { border-color:var(--brand); }
+.otp input.bad { border-color:var(--bad); }
+.row { display:flex; justify-content:space-between; align-items:center; gap:10px;
+  margin-top:13px; font-size:.81rem; }
+.linkbtn { background:none; border:none; padding:0; font:inherit; font-size:.81rem;
+  color:var(--brand); cursor:pointer; text-decoration:underline;
+  text-underline-offset:3px; }
+.linkbtn:disabled { color:var(--muted); cursor:default; text-decoration:none; }
+.msg { margin:12px 0 0; font-family:"IBM Plex Mono",monospace; font-size:.78rem;
+  line-height:1.5; }
+.msg.err { color:var(--bad); }
+/* Not an error - nothing went wrong, a session simply ran out. Sits above the
+   explanation rather than under the form, because it is the reason this page
+   is on screen at all. */
+.msg.expired { margin:0 0 14px; color:var(--flag); background:var(--surface-2);
+  border:1px solid var(--rule-firm); border-left:3px solid var(--flag);
+  border-radius:var(--radius); padding:9px 11px; }
+.notice { margin-top:18px; background:var(--surface-2); border:1px solid var(--rule);
+  border-left:3px solid var(--flag); border-radius:var(--radius); padding:13px; }
+.notice h2 { margin:0 0 4px; font-size:.72rem; text-transform:uppercase;
+  letter-spacing:.08em; color:var(--flag); font-weight:700; }
+.notice p { margin:0 0 9px; font-size:.8rem; color:var(--ink-2); }
+.notice code { font-family:"IBM Plex Mono",monospace; font-weight:600;
+  background:var(--surface); border:1px solid var(--rule-firm); border-radius:3px;
+  padding:1px 6px; }
+.fineprint { margin:16px 0 0; font-size:.78rem; line-height:1.6; color:var(--muted); }
+.fineprint code { font-family:"IBM Plex Mono",monospace; font-size:.75rem;
+  background:var(--surface); border:1px solid var(--rule-firm); border-radius:3px;
+  padding:1px 5px; color:var(--ink-2); }
+footer { text-align:center; margin-top:18px; font-size:.8rem; color:var(--muted); }
+footer a { color:var(--brand); }
+[hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <nav class="topnav"><a href="/">&larr; expenze.ai</a></nav>
+  <a class="logo" href="/" title="Back to expenze.ai">Expenze<span class="dot">.</span></a>
+  <p class="tagline">Agentic expense auditing</p>
+
+  <div class="card">
+    <!-- Step 1 -->
+    <section id="step-email">
+      <h1>Sign in</h1>
+      <!-- Sent here by an expired session rather than by choosing to sign in.
+           Saying so is the difference between "time passed" and "something
+           broke", and only one of those makes somebody call support. -->
+      <p class="msg expired" id="expired-note" hidden>Your session ended while you were away. Sign in again to carry on.</p>
+      <p class="sub">We email a six-digit code to your work address. No password to remember, and none to leak.</p>
+      <form id="form-email">
+        <label for="email">Work email</label>
+        <input type="email" id="email" placeholder="you@yourcompany.com" autocomplete="email" required>
+        <button class="cta" type="submit">Send code</button>
+        <p class="msg err" id="email-err" hidden></p>
+      </form>
+    </section>
+
+    <!-- Step 2 -->
+    <section id="step-otp" hidden>
+      <h1>Enter your code</h1>
+      <p class="sub">Sent to <strong id="sent-to"></strong>. It expires in 10 minutes.</p>
+      <label for="d0">Six-digit code</label>
+      <div class="otp" id="otp">
+        <input id="d0" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 2">
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 3">
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 4">
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 5">
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 6">
+      </div>
+      <button class="cta" id="verify" type="button" disabled>Verify and continue</button>
+      <p class="msg err" id="err" hidden></p>
+      <div class="row">
+        <button class="linkbtn" id="change" type="button">Use a different email</button>
+        <button class="linkbtn" id="resend" type="button">Resend code</button>
+      </div>
+    </section>
+
+    <p class="fineprint">
+      The code is emailed from <code>noreply@expenze.ai</code> and expires in ten
+      minutes. Signing in for the first time is what accepts an invitation, so use
+      the address you were invited on.
+    </p>
+  </div>
+
+  <footer>
+    No organisation yet? <a href="/#pricing">Create one</a>
+    <span class="sep">&middot;</span>
+    <a href="/">Back to the home page</a>
+  </footer>
+</main>
+
+<script>
+"use strict";
+const API = "https://0w1qn4vso1.execute-api.ap-southeast-1.amazonaws.com/poc/auth";
+const $ = (id) => document.getElementById(id);
+const boxes = [...$("otp").querySelectorAll("input")];
+let email = "";
+
+function go() { location.href = ONWARD(); }
+
+function setBusy(btn, busy, label) {
+  btn.disabled = busy;
+  btn.textContent = busy ? "Working…" : label;
+}
+function showErr(text) {
+  const err = $("err");
+  err.hidden = false;
+  err.textContent = text;
+}
+
+async function post(path, body) {
+  const res = await fetch(API + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+  return { ok: res.ok, data };
+}
+
+$("form-email").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector("button");
+  email = $("email").value.trim().toLowerCase();
+  $("email-err").hidden = true;
+  setBusy(btn, true, "Send code");
+  const { ok, data } = await post("/request", { email });
+  setBusy(btn, false, "Send code");
+  if (!ok) {
+    const m = $("email-err");
+    m.hidden = false;
+    m.textContent = data.error || "Could not send a code. Try again.";
+    return;
+  }
+  $("sent-to").textContent = email;
+  $("step-email").hidden = true;
+  $("step-otp").hidden = false;
+  $("err").hidden = true;
+  boxes.forEach(b => { b.value = ""; b.classList.remove("filled","bad"); });
+  $("verify").disabled = true;
+  boxes[0].focus();
+  startCooldown();
+});
+
+$("change").addEventListener("click", () => {
+  $("step-otp").hidden = true;
+  $("step-email").hidden = false;
+  $("err").hidden = true;
+  $("email").focus();
+});
+
+let cooling = false;
+function startCooldown() {
+  const btn = $("resend");
+  cooling = true; btn.disabled = true;
+  let left = 60;
+  const tick = setInterval(() => {
+    btn.textContent = `Resend in ${left--}s`;
+    if (left < 0) { clearInterval(tick); btn.textContent = "Resend code"; btn.disabled = false; cooling = false; }
+  }, 1000);
+  btn.textContent = `Resend in ${left--}s`;
+}
+$("resend").addEventListener("click", async () => {
+  if (cooling) return;
+  const { ok, data } = await post("/request", { email });
+  if (!ok) { showErr(data.error || "Could not resend."); return; }
+  $("err").hidden = true;
+  startCooldown();
+});
+
+const code = () => boxes.map(b => b.value).join("");
+
+boxes.forEach((box, i) => {
+  box.addEventListener("input", () => {
+    box.value = box.value.replace(/\D/g, "").slice(0, 1);
+    box.classList.toggle("filled", box.value !== "");
+    boxes.forEach(b => b.classList.remove("bad"));
+    $("err").hidden = true;
+    if (box.value && i < boxes.length - 1) boxes[i + 1].focus();
+    $("verify").disabled = code().length !== 6;
+  });
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Backspace" && !box.value && i > 0) boxes[i - 1].focus();
+    if (e.key === "ArrowLeft" && i > 0) boxes[i - 1].focus();
+    if (e.key === "ArrowRight" && i < boxes.length - 1) boxes[i + 1].focus();
+    if (e.key === "Enter" && !$("verify").disabled) $("verify").click();
+  });
+  box.addEventListener("paste", (e) => {
+    e.preventDefault();
+    const digits = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+    digits.split("").forEach((d, k) => {
+      if (boxes[k]) { boxes[k].value = d; boxes[k].classList.add("filled"); }
+    });
+    boxes[Math.min(digits.length, 5)].focus();
+    $("verify").disabled = code().length !== 6;
+  });
+});
+
+$("verify").addEventListener("click", async () => {
+  const btn = $("verify");
+  setBusy(btn, true, "Verify and continue");
+  const { ok, data } = await post("/verify", { email, code: code() });
+  setBusy(btn, false, "Verify and continue");
+  if (!ok) {
+    boxes.forEach(b => b.classList.add("bad"));
+    showErr(data.error || "That code is not valid.");
+    return;
+  }
+  try { sessionStorage.setItem("expenze_token", data.token);
+        sessionStorage.setItem("expenze_email", data.email); } catch (_) {}
+  go();
+});
+
+// No role in the URL: the console asks the API who you are, and a query
+// parameter can neither prove nor change that.
+const ONWARD = () => "/app.html";
+
+// Arriving because a session expired, rather than by choosing to sign in.
+(function fromExpiry() {
+  if (!new URLSearchParams(location.search).get("expired")) return;
+  const note = document.getElementById("expired-note");
+  if (note) note.hidden = false;
+})();
+
+// Arriving from sign-up: the code is already sent, so skip straight to it.
+(function fromSignup() {
+  const q = new URLSearchParams(location.search);
+  const e = (q.get("email") || "").trim().toLowerCase();
+  if (!e) return;
+  email = e;
+  $("sent-to").textContent = e;
+  $("step-email").hidden = true;
+  $("step-otp").hidden = false;
+  if (q.get("new")) {
+    const h = document.querySelector("#step-otp .sub");
+    h.innerHTML = `Your organisation is created with <strong>50 trial credits</strong>. ` +
+      `We sent a code to <strong>${e.replace(/</g,"&lt;")}</strong> — it expires in 10 minutes.`;
+  }
+  startCooldown();
+  boxes[0].focus();
+})();
+</script>
+</body>
+</html>
