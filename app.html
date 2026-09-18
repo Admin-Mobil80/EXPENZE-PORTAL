@@ -1452,7 +1452,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
                different. -->
           <div class="field" id="retype-field" hidden>
             <label for="retype-go">&nbsp;</label>
-            <button class="btn primary" type="button" id="retype-go" hidden>Save and re-check</button>
+            <button class="btn primary" type="button" id="retype-go" hidden>Save</button>
           </div>
           <p class="hint" id="controls-hint"></p>
           <p class="msg" id="answer-msg" hidden></p>
@@ -4028,20 +4028,26 @@ function renderClaimNav() {
   const home = claimHome(SUBMISSIONS.find(x => x.id === selectedId));
   // Counted from the list as it was opened, so a claim decided on the way
   // through keeps its place rather than shifting everything after it.
-  /* "1 of 3 in this set", not "1 of 3".
+  /* How many are left, not where you are in a frozen list.
    *
-   * The tab badge counts what is still undecided and this counts a position
-   * in the list as it was opened, so the moment a claim is decided the two
-   * disagree - "Review queue 2" in the strip above "Review queue · 1 of 3"
-   * below it. Both are right and neither says which question it is answering,
-   * so they read as one number the product cannot keep straight.
+   * This said "1 of 3", counting a position in the queue as it was when the
+   * claim was opened. The tab badge counts what is still undecided, so the
+   * moment anything was decided the two disagreed - "Review queue 2" in the
+   * strip, "Review queue · 1 of 3" directly below it - and one number that
+   * contradicts another on the same screen is worse than no number, whatever
+   * either of them technically means.
    *
-   * Three words fix that without touching either number. Recomputing the
-   * position to match the badge is the wrong repair: it would renumber the
-   * sequence under somebody halfway through working it, which is the
-   * disorientation this page exists to remove. */
+   * So the bar answers the question the badge answers, with the same
+   * arithmetic: how much work is left. Stepping still walks the sequence the
+   * reader was given - see `claimSiblings` - because renumbering that under
+   * somebody halfway through it is the disorientation this page exists to
+   * remove. The difference is that the sequence is no longer *reported*, only
+   * followed. */
+  const waiting = home === "queue" ? SUBMISSIONS.filter(isQueued).length
+                : home === "payments" ? payableClaims().filter(c => c.outstanding > 0).length
+                : 0;
   $("claim-pos").textContent = "← " + (TAB_LABEL[home] || "Back")
-    + (stepping ? ` · ${at + 1} of ${claimSiblings.length} in this set` : "");
+    + (stepping && waiting ? ` · ${waiting} still waiting` : "");
 
   /* Where the claim went, when it is no longer in the list this position
    * counts against.
@@ -4862,9 +4868,6 @@ function renderDetail() {
     }
   }
 
-  // Nothing in the policy covers what the model read off this bill, so a
-  // person has to say what it is before it can be approved into a payment.
-  const untagged = res.violations.some(v => v.code === "no_rule_for_expense_type");
   const locked = !!decision;
   const closed = !!settlementStage(sub);
   // Nothing has been read yet, so there is nothing to correct. Leaving the
@@ -4906,21 +4909,10 @@ function renderDetail() {
    * re-check is, and it re-audits rather than trusting the browser. The group
    * decides nothing, so it saves on its own. */
   const paid = isPaid(sub) || closed;
-  /* The agent has this claim back and is deciding it again.
-   *
-   * Pressing Re-check used to leave the page exactly as it was: the same
-   * findings, the same buttons, and a one-line result under the controls. The
-   * work happens on a Lambda and takes a few seconds, so for those seconds the
-   * screen said nothing was happening - and then the buttons changed under the
-   * reviewer's hands, Reject becoming Approve without anybody touching it.
-   *
-   * So the claim is visibly in flight until it comes back: the controls are
-   * frozen, the decision buttons are replaced by what is being done, and the
-   * page says what came back when it does. `recheckOf` covers the moment
-   * between the click and the first poll; `stillReading` covers it from then
-   * on, which also catches a claim being re-read for any other reason. */
-  const rechecking = recheckOf === sub.id || (!!sub.correctedAt && stillReading(sub));
-  const frozen = paid || unread || rechecking || !reviewingHere();
+  /* Being saved. Not being re-decided - nothing re-decides a claim that has
+   * reached a person. See `saveAnswers`. */
+  const saving = savingOf === sub.id;
+  const frozen = paid || unread || saving || !reviewingHere();
   ["headcount", "src", "etype", "ccy", "claim-group"].forEach(id => {
     const el = $(id); if (el) el.disabled = frozen;
   });
@@ -5086,7 +5078,7 @@ function renderDetail() {
   // Your own claim, yours to take back - until the money has moved, at which
   // point withdrawing it would leave a payment recorded against a claim that
   // says it was never made.
-  if (!rechecking && isMine(sub) && !mayReview && !isPaid(sub)
+  if (!saving && isMine(sub) && !mayReview && !isPaid(sub)
       && !(decision && decision.action === "Withdrawn")) {
     const wd = document.createElement("button");
     wd.className = "btn caution"; wd.type = "button"; wd.textContent = "Withdraw";
@@ -5095,27 +5087,17 @@ function renderDetail() {
     abox.appendChild(wd);
   }
 
-  if (rechecking) {
-    /* What is happening, while it happens.
-     *
-     * No decision buttons at all, rather than disabled ones: the verdict they
-     * would act on is being recomputed, so every one of them is about to mean
-     * something different. A reviewer who clicked Approve on the old verdict
-     * a beat before the new one landed would be approving a figure the page
-     * had already replaced. */
+  if (saving) {
+    // A write, not a decision. It is quick and it changes nothing about the
+    // claim except the facts the reviewer just supplied, but the buttons go
+    // while it is in flight so nothing is decided against a half-saved claim.
     const s = document.createElement("span");
     s.className = "stamp working";
     const dot = document.createElement("span");
     dot.className = "spin"; dot.setAttribute("aria-hidden", "true");
-    s.append(dot, document.createTextNode(
-      "Re-checking this claim against your policy…"));
+    s.append(dot, document.createTextNode("Saving…"));
     s.setAttribute("role", "status");
     abox.appendChild(s);
-    const note = document.createElement("span");
-    note.className = "stamp pending";
-    note.textContent = "The agent is deciding it again. This takes a few "
-      + "seconds; the findings and the buttons below update when it answers.";
-    abox.appendChild(note);
   } else if (decision || settlementStage(sub)) {
     const s = document.createElement("span"); s.className="stamp";
     const stageNow = settlementStage(sub);
@@ -5273,51 +5255,52 @@ function renderDetail() {
      * Reject is always offered. Refusing a claim needs no cost centre, since
      * nothing is being charged to one. */
     const unsaved = !isPristine(sub, w);
-    const choices = (untagged || unsaved || needsGroup)
+
+    /* Every claim is approved under an expense type this organisation has
+     * configured. No exceptions.
+     *
+     * The gate used to be the agent's stored finding - "does the verdict
+     * block on no_rule_for_expense_type" - which asks about the reading
+     * rather than about the claim. A verdict older than the rule that now
+     * covers it was refused while its type was already right, and a claim the
+     * agent tagged `not_covered` without blocking could go through untagged.
+     * The type is what every report groups by; a payment filed under nothing
+     * is a line in the accounts nobody can explain.
+     *
+     * So the question is asked of the claim as it stands: is the type on it
+     * one of the enabled types in the policy right now. `not_covered` is not,
+     * which is the point of that answer. */
+    const typeOk = rules.types.some(t => t.enabled && t.id === w.type);
+    const choices = (!typeOk || unsaved || needsGroup)
       ? [["Reject","danger","Rejected"]]
       : [["Approve as reviewed","primary","Approved"],
          ["Reject","danger","Rejected"]];
 
-    // With a change pending, the thing to press next goes where Approve was.
-    //
-    // Telling somebody their change is unsaved and leaving them to find the
-    // button is most of the original problem kept: "Save and re-check" lives
-    // in the grey panel well above this row, and a reviewer who has just used
-    // the dropdown is looking here. The same control, reachable from where the
-    // decision is made - one handler, two places to reach it, so the two can
-    // never disagree about what saving does.
-    /* Also when nothing has changed but the claim is blocked for want of a rule.
+    /* Save, and nothing more.
      *
-     * The control this replaced appeared on `changed || untagged`, and moving
-     * it here I kept only the first half - so a claim whose *stored* verdict
-     * says "no rule covers this" but whose type is already right had no button
-     * at all. Pristine, so nothing to save; blocked, so nothing to approve.
-     * The only escape was to set the type to something else and back, and
-     * coming back made it pristine again.
+     * This button was "Save and re-check", and it sent the claim back round
+     * the policy engine under the new type. A claim that has reached a person
+     * is decided by that person: they read the bill, the findings and the
+     * figures, and they approve or reject. Nothing re-decides it in between,
+     * so there is nothing to wait for and no second verdict to reconcile with
+     * the one on screen.
      *
-     * Exactly what a stale verdict looks like: the claim was decided before
-     * the type it needs was added to the policy, and re-running it is the
-     * whole fix. There has to be a way to ask for that.
-     */
-    if (unsaved || untagged) {
+     * What this writes down is what the agent could not answer - what kind of
+     * expense it is, what it is denominated in, which cost centre it comes
+     * out of. Those are needed for the claim to be paid and reported on, not
+     * for it to be re-judged. */
+    if (unsaved) {
       const save = document.createElement("button");
       save.className = "btn primary"; save.type = "button";
       save.id = "retype-inline";
       // Drawn from the flag, so whichever button is on screen after a render
       // shows the truth. The state cannot live on the element: the element in
       // flight is not the element that comes back.
-      save.disabled = retypeBusy;
-      // "Save and re-check" promises to save something. With nothing changed
-      // it would be a button that lies about what it does; what it does then
-      // is re-run the audit against today's policy, so it says that.
-      save.textContent = retypeBusy ? "Saving…"
-                       : unsaved ? "Save and re-check" : "Re-check";
-      save.title = unsaved
-        ? "Send your change to the agent. It re-reads the claim against the "
-          + "policy, and then you can approve it."
-        : "Decide this claim again against the policy as it stands now. "
-          + "Nothing about the claim changes.";
-      save.addEventListener("click", saveAndRecheck);
+      save.disabled = savingOf === sub.id;
+      save.textContent = savingOf === sub.id ? "Saving…" : "Save";
+      save.title = "Record the expense type, currency and group on this "
+        + "claim. It is not re-judged; approving or rejecting it is yours.";
+      save.addEventListener("click", saveAnswers);
       abox.appendChild(save);
     }
 
@@ -5345,16 +5328,21 @@ function renderDetail() {
 
     s.textContent = unsaved
       ? (pending ? `${pending} — not saved yet. ` : "Unsaved change. ")
-        + "Save and re-check first; the verdict on file is still the earlier one."
-      : untagged
-      // Names both ways out, because from the screen they look the same. The
-      // type may genuinely be missing, or it may be right and the verdict
-      // simply older than the rule that now covers it - and being told only
-      // "set a type" while looking at the type you set is maddening.
-      ? "Nothing in the stored verdict covers this claim. Set the expense type above, "
-        + "or press Re-check if it is already right — the verdict may predate the rule."
+        + "Save it before approving."
+      : !typeOk
+      // Said as the requirement it is, rather than as a finding. Nothing is
+      // wrong with the claim; it simply cannot be reported on until somebody
+      // says what kind of expense it is.
+      ? "Set an expense type above. Every claim is reported under one, so this "
+        + "cannot be approved without it — rejecting it needs nothing."
+      : needsGroup
+      // The same courtesy for the other thing that withholds Approve. It is
+      // in the findings above too, but a reviewer looking at a row of buttons
+      // and wondering where Approve went is looking here.
+      ? "Set a group above. The payment comes out of a cost centre, so this "
+        + "cannot be approved without one — rejecting it needs nothing."
       : `Deciding as ${currentUser.name} · ${currentUser.role}`;
-    if (untagged || unsaved) s.style.color = "var(--warn)";
+    if (!typeOk || unsaved || needsGroup) s.style.color = "var(--warn)";
     abox.appendChild(s);
     // Not blocked - a sole owner with nobody else to ask would never be paid -
     // but said out loud. The claim records who decided it, and "the same
@@ -9835,17 +9823,15 @@ $("etype").addEventListener("change", e => {
  * on another's disabled state, across a re-render that replaces one of them.
  * A named function has no such state to get wrong.
  */
-let retypeBusy = false;
+// The claim whose answers are being written, while the write is in flight.
+let savingOf = null;
 // Which claim the line under the controls is about, so it can be dropped when
 // the page moves to another one. See `renderDetail`.
 let answerMsgFor = null;
-// The claim the agent currently has back, from the click until the server says
-// it has finished reading it. See `watchRecheck`.
-let recheckOf = null;
 
-async function saveAndRecheck() {
+async function saveAnswers() {
   const sub = SUBMISSIONS.find(s => s.id === selectedId);
-  if (!sub || retypeBusy) return;
+  if (!sub || savingOf) return;
   const chosen = $("etype").value, chosenCcy = $("ccy").value;
   // "" is a real answer here - a reviewer clearing a group the agent got
   // wrong - so it is sent, and the server distinguishes absent from empty.
@@ -9878,33 +9864,26 @@ async function saveAndRecheck() {
   const res = evaluate(sub);
   const untagged = (res.violations || []).some(v => v.code === "no_rule_for_expense_type");
   const label0 = (rules.types.find(t => t.id === chosen) || {}).label || chosen;
+  // The promise this used to make - "it is re-checked against the rules for
+  // that type, and it may clear for payment without further review" - is no
+  // longer true and was never wanted. Saving records a fact; the claim stays
+  // in front of this reviewer, who then approves or rejects it themselves.
   if (untagged && !window.confirm(
       `Set this claim to ${label0}?\n\n`
-      + "Nothing in your policy covered it, so this is your judgment about what "
-      + "it is. It is re-checked against the rules for that type, and it may "
-      + "clear for payment without further review. The change is recorded "
-      + `against your name.`)) return;
+      + "Nothing in your policy covered it, so this is your judgment about "
+      + "what it is. It is recorded against your name, and the claim stays "
+      + "here for you to approve or reject.")) return;
 
-  /* Held down until the re-audit has actually been read back.
-   *
-   * This re-enabled the button the instant the POST returned, and then waited
-   * four seconds before reloading - so for those four seconds the control was
-   * live, said "Save and re-check", and looked untouched. Pressing it again is
-   * the natural thing to do, and it sent a second re-audit: another model call,
-   * against a claim already mid-flight.
-   *
-   * Every way in is disabled, not just this one. The button in the decision row
-   * reaches this same handler, so disabling only `retype-go` left the other one
-   * clickable - which is exactly what happened.
-   */
   /* A flag rather than a disabled element.
    *
    * The control is redrawn on every render, so "is a save in flight" cannot
    * live on the button - the button in flight is not the button that comes
    * back. It lives here, and the renderer reads it, so whichever button is on
-   * screen shows the right state.
+   * screen shows the right state, and every way in is held at once: the
+   * button in the decision row and the one in the panel reach this same
+   * handler, so disabling one element left the other clickable.
    */
-  retypeBusy = true;
+  savingOf = sub.id;
   renderAll();
 
   let ok = false, data = {};
@@ -9917,82 +9896,19 @@ async function saveAndRecheck() {
     data = { error: "Network error — the change was not saved." };
   }
 
-  // Cleared and redrawn *before* the message is written. `renderDetail` hides
-  // `answer-msg` on every pass, so showing the result first and rendering
-  // second wipes the line that says what happened, which is the one part of
-  // this a reviewer reads.
-  retypeBusy = false;
+  // Cleared and redrawn *before* the message is written, so the render does
+  // not wipe the line that says what happened.
+  savingOf = null;
   renderAll();
 
-  if (!ok) return show(data.error || "Could not set the expense type.", false);
-  show(`Set to ${label0} in ${chosenCcy}. Re-checking it against your policy…`, true);
-  watchRecheck(sub.id, label0, chosenCcy);
-}
-
-/* Follow a claim round the agent, and say what came back.
- *
- * This was `setTimeout(loadRecords, 4000)` and a line of text. Four seconds is
- * a guess at how long a Lambda takes to re-read a claim, and it was wrong in
- * both directions: too short and the reviewer saw the old verdict refresh into
- * the old verdict, too long and they sat in front of a finished claim. Either
- * way the page said nothing while it waited, and then the buttons changed by
- * themselves - Reject quietly becoming Approve, with no statement anywhere
- * that a decision had been recomputed.
- *
- * So: poll until the server says it has finished reading, and then say what it
- * decided. `stillReading` is the same test the queue uses, so this asks the
- * one question that actually has an answer rather than counting seconds.
- */
-const RECHECK_EVERY = 1800;
-const RECHECK_GIVE_UP = 90 * 1000;
-
-async function watchRecheck(id, label, ccy) {
-  recheckOf = id;
+  if (!ok) return show(data.error || "Could not save the change.", false);
+  await loadRecords();
   renderAll();
-  const started = Date.now();
-  // The first poll is delayed: the claim has to reach the worker and be put
-  // back into `queued` before "still reading" means anything, and asking
-  // immediately would read the row as finished before it had started.
-  while (recheckOf === id) {
-    await new Promise(r => setTimeout(r, RECHECK_EVERY));
-    if (recheckOf !== id) return;      // another claim took over, or the page moved on
-    await loadRecords();
-    const sub = SUBMISSIONS.find(s => s.id === id);
-    const givenUp = Date.now() - started > RECHECK_GIVE_UP;
-    if (sub && stillReading(sub) && !givenUp) continue;
-
-    recheckOf = null;
-    renderAll();
-    const msg = $("answer-msg");
-    if (!msg) return;
-    msg.hidden = false;
-    answerMsgFor = id;
-    if (!sub) { msg.className = "msg ok"; msg.textContent = "Re-checked."; return; }
-    if (givenUp) {
-      // Said rather than hidden. A claim that is genuinely stuck is worth
-      // knowing about, and pretending the page is simply still working is how
-      // somebody waits ten minutes for nothing.
-      msg.className = "msg err";
-      msg.textContent = "The agent is taking longer than usual on this one. "
-        + "It is still being read — press Refresh in a minute.";
-      return;
-    }
-    // What it decided, in the words the rest of the page uses.
-    const res = evaluate(sub);
-    const blocking = res.violations.filter(v => v.blocking);
-    msg.className = "msg ok";
-    msg.textContent = `Re-checked as ${label} in ${ccy}. `
-      + (blocking.length
-         ? (blocking.length === 1
-            ? "One finding still needs a decision — it is listed above."
-            : `${blocking.length} findings still need a decision — they are `
-              + "listed above.")
-         : "Nothing in the policy stops it now; releasing it is yours to do.");
-    return;
-  }
+  show(`Saved: ${label0} in ${chosenCcy}. Approve or reject it when you are ready.`,
+       true);
 }
 
-$("retype-go").addEventListener("click", saveAndRecheck);
+$("retype-go").addEventListener("click", saveAnswers);
 $("claim-group").addEventListener("change", e => {
   const w = workingCopy(SUBMISSIONS.find(s => s.id === selectedId));
   w.group = e.target.value;
