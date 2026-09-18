@@ -690,6 +690,18 @@ tr.yeartotal td { border-top:2px solid var(--rule-firm); font-weight:600;
 .btn.back:hover:not(:disabled) { background:var(--review); color:var(--paper); border-color:var(--review); }
 .stamp { font-family:"IBM Plex Mono",monospace; font-size:.71rem; color:var(--ok); }
 .stamp.pending { color:var(--muted); }
+/* Work in progress, where the decision buttons would be. It reads as busy
+   rather than as an outcome, which is the whole point: the verdict those
+   buttons act on is being recomputed. */
+.stamp.working { color:var(--review); display:inline-flex; align-items:center; gap:8px; }
+.spin { width:11px; height:11px; border-radius:50%; flex:none;
+  border:2px solid var(--review); border-top-color:transparent;
+  animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  /* Still a marker, just not a moving one. */
+  .spin { animation:none; border-top-color:var(--review); opacity:.45; }
+}
 
 /* rules view */
 /* master-detail: the list stays scannable however many types exist, and only
@@ -4824,7 +4836,21 @@ function renderDetail() {
    * re-check is, and it re-audits rather than trusting the browser. The group
    * decides nothing, so it saves on its own. */
   const paid = isPaid(sub) || closed;
-  const frozen = paid || unread || !reviewingHere();
+  /* The agent has this claim back and is deciding it again.
+   *
+   * Pressing Re-check used to leave the page exactly as it was: the same
+   * findings, the same buttons, and a one-line result under the controls. The
+   * work happens on a Lambda and takes a few seconds, so for those seconds the
+   * screen said nothing was happening - and then the buttons changed under the
+   * reviewer's hands, Reject becoming Approve without anybody touching it.
+   *
+   * So the claim is visibly in flight until it comes back: the controls are
+   * frozen, the decision buttons are replaced by what is being done, and the
+   * page says what came back when it does. `recheckOf` covers the moment
+   * between the click and the first poll; `stillReading` covers it from then
+   * on, which also catches a claim being re-read for any other reason. */
+  const rechecking = recheckOf === sub.id || (!!sub.correctedAt && stillReading(sub));
+  const frozen = paid || unread || rechecking || !reviewingHere();
   ["headcount", "src", "etype", "ccy", "claim-group"].forEach(id => {
     const el = $(id); if (el) el.disabled = frozen;
   });
@@ -4990,7 +5016,7 @@ function renderDetail() {
   // Your own claim, yours to take back - until the money has moved, at which
   // point withdrawing it would leave a payment recorded against a claim that
   // says it was never made.
-  if (isMine(sub) && !mayReview && !isPaid(sub)
+  if (!rechecking && isMine(sub) && !mayReview && !isPaid(sub)
       && !(decision && decision.action === "Withdrawn")) {
     const wd = document.createElement("button");
     wd.className = "btn caution"; wd.type = "button"; wd.textContent = "Withdraw";
@@ -4999,7 +5025,28 @@ function renderDetail() {
     abox.appendChild(wd);
   }
 
-  if (decision || settlementStage(sub)) {
+  if (rechecking) {
+    /* What is happening, while it happens.
+     *
+     * No decision buttons at all, rather than disabled ones: the verdict they
+     * would act on is being recomputed, so every one of them is about to mean
+     * something different. A reviewer who clicked Approve on the old verdict
+     * a beat before the new one landed would be approving a figure the page
+     * had already replaced. */
+    const s = document.createElement("span");
+    s.className = "stamp working";
+    const dot = document.createElement("span");
+    dot.className = "spin"; dot.setAttribute("aria-hidden", "true");
+    s.append(dot, document.createTextNode(
+      "Re-checking this claim against your policy…"));
+    s.setAttribute("role", "status");
+    abox.appendChild(s);
+    const note = document.createElement("span");
+    note.className = "stamp pending";
+    note.textContent = "The agent is deciding it again. This takes a few "
+      + "seconds; the findings and the buttons below update when it answers.";
+    abox.appendChild(note);
+  } else if (decision || settlementStage(sub)) {
     const s = document.createElement("span"); s.className="stamp";
     const stageNow = settlementStage(sub);
     // Lead with what happened last. On a paid claim "Approved by" describes a
@@ -9704,6 +9751,9 @@ let retypeBusy = false;
 // Which claim the line under the controls is about, so it can be dropped when
 // the page moves to another one. See `renderDetail`.
 let answerMsgFor = null;
+// The claim the agent currently has back, from the click until the server says
+// it has finished reading it. See `watchRecheck`.
+let recheckOf = null;
 
 async function saveAndRecheck() {
   const sub = SUBMISSIONS.find(s => s.id === selectedId);
@@ -9787,11 +9837,71 @@ async function saveAndRecheck() {
   renderAll();
 
   if (!ok) return show(data.error || "Could not set the expense type.", false);
-  show(`Set to ${label0} in ${chosenCcy}. Re-checking it against your policy.`, true);
-  // The claim goes back to the agent, so the four seconds are it being read
-  // rather than us waiting for nothing. It stays on the list while that
-  // happens - see isQueued.
-  setTimeout(loadRecords, 4000);
+  show(`Set to ${label0} in ${chosenCcy}. Re-checking it against your policy…`, true);
+  watchRecheck(sub.id, label0, chosenCcy);
+}
+
+/* Follow a claim round the agent, and say what came back.
+ *
+ * This was `setTimeout(loadRecords, 4000)` and a line of text. Four seconds is
+ * a guess at how long a Lambda takes to re-read a claim, and it was wrong in
+ * both directions: too short and the reviewer saw the old verdict refresh into
+ * the old verdict, too long and they sat in front of a finished claim. Either
+ * way the page said nothing while it waited, and then the buttons changed by
+ * themselves - Reject quietly becoming Approve, with no statement anywhere
+ * that a decision had been recomputed.
+ *
+ * So: poll until the server says it has finished reading, and then say what it
+ * decided. `stillReading` is the same test the queue uses, so this asks the
+ * one question that actually has an answer rather than counting seconds.
+ */
+const RECHECK_EVERY = 1800;
+const RECHECK_GIVE_UP = 90 * 1000;
+
+async function watchRecheck(id, label, ccy) {
+  recheckOf = id;
+  renderAll();
+  const started = Date.now();
+  // The first poll is delayed: the claim has to reach the worker and be put
+  // back into `queued` before "still reading" means anything, and asking
+  // immediately would read the row as finished before it had started.
+  while (recheckOf === id) {
+    await new Promise(r => setTimeout(r, RECHECK_EVERY));
+    if (recheckOf !== id) return;      // another claim took over, or the page moved on
+    await loadRecords();
+    const sub = SUBMISSIONS.find(s => s.id === id);
+    const givenUp = Date.now() - started > RECHECK_GIVE_UP;
+    if (sub && stillReading(sub) && !givenUp) continue;
+
+    recheckOf = null;
+    renderAll();
+    const msg = $("answer-msg");
+    if (!msg) return;
+    msg.hidden = false;
+    answerMsgFor = id;
+    if (!sub) { msg.className = "msg ok"; msg.textContent = "Re-checked."; return; }
+    if (givenUp) {
+      // Said rather than hidden. A claim that is genuinely stuck is worth
+      // knowing about, and pretending the page is simply still working is how
+      // somebody waits ten minutes for nothing.
+      msg.className = "msg err";
+      msg.textContent = "The agent is taking longer than usual on this one. "
+        + "It is still being read — press Refresh in a minute.";
+      return;
+    }
+    // What it decided, in the words the rest of the page uses.
+    const res = evaluate(sub);
+    const blocking = res.violations.filter(v => v.blocking);
+    msg.className = "msg ok";
+    msg.textContent = `Re-checked as ${label} in ${ccy}. `
+      + (blocking.length
+         ? (blocking.length === 1
+            ? "One finding still needs a decision — it is listed above."
+            : `${blocking.length} findings still need a decision — they are `
+              + "listed above.")
+         : "Nothing in the policy stops it now; releasing it is yours to do.");
+    return;
+  }
 }
 
 $("retype-go").addEventListener("click", saveAndRecheck);
