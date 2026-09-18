@@ -555,6 +555,15 @@ tr.yeartotal td { border-top:2px solid var(--rule-firm); font-weight:600;
 
 /* The original, and the text the model read off it. The original leads:
    it is the document, and everything else on this screen is derived from it. */
+/* The documents of one claim. Same shape as the Original / Text read switch
+   below it, one row up, because it is the same kind of choice about the same
+   panel. */
+.docs { display:flex; gap:4px; flex-wrap:wrap; padding:8px 14px 0; }
+.docs button { font-family:"IBM Plex Mono",monospace; font-size:.68rem; padding:4px 9px;
+  border:1px solid var(--rule-firm); border-radius:var(--radius);
+  background:var(--surface); color:var(--muted); cursor:pointer; max-width:20rem;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.docs button[aria-selected="true"] { border-color:var(--ink); color:var(--ink); font-weight:600; }
 .rswitch { display:flex; align-items:center; gap:6px; padding:11px 14px 0; }
 .rtab { font-family:"IBM Plex Mono",monospace; font-size:.65rem; text-transform:uppercase;
   letter-spacing:.06em; padding:4px 10px; border:1px solid var(--rule); background:var(--surface);
@@ -1406,6 +1415,10 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
              actually carried a registration, which most retail ones do not -
              an empty field on every claim teaches people to stop reading it. -->
         <p class="vtax" id="vendor-tax" hidden></p>
+        <!-- One purchase can arrive as several documents - an invoice and its
+             receipt in one email. Shown only when there is more than one,
+             because a switcher with a single option is furniture. -->
+        <nav class="docs" id="doc-strip" role="tablist" aria-label="Documents on this claim" hidden></nav>
         <div class="rswitch" role="tablist" aria-label="How to view this receipt">
           <button type="button" class="rtab on" id="rtab-orig" role="tab" aria-selected="true">Original</button>
           <button type="button" class="rtab" id="rtab-text" role="tab" aria-selected="false">Text read</button>
@@ -3146,6 +3159,8 @@ function toClaim(s) {
     // The claim this is a second document of. An invoice and its receipt
     // arrive in one email and each becomes a claim; only one of them is one.
     companionOf: s.companion_of || "",
+    // What the file was called. A claim with two documents names them.
+    receiptName: s.receipt_name || "",
   };
 }
 
@@ -3783,6 +3798,19 @@ const agentMayRelease = (sub) =>
  * pay. */
 const isCompanion = (sub) => !!sub.companionOf;
 
+/* Every document of one purchase: the claim, then whatever arrived with it.
+ *
+ * An invoice and its receipt are both wanted in the record - the invoice is
+ * what tax is reclaimed against, the receipt is proof the money actually left.
+ * Suppressing the companion as a claim must not suppress it as evidence, or
+ * finance ends up holding half the paperwork for a bill it has paid. */
+function documentsFor(sub) {
+  if (!sub) return [];
+  const ref = sub.reference || "";
+  const mine = ref ? SUBMISSIONS.filter(s => s.companionOf === ref) : [];
+  return [sub, ...mine];
+}
+
 const isQueued = (sub) => {
   if (isCompanion(sub)) return false;
   // A claim being re-read *because a reviewer just corrected it* stays on the
@@ -4318,6 +4346,7 @@ function renderDetail() {
   }
   splits.forEach(el => { el.hidden = false; });
 
+  if (selectedId !== sub.id) openDoc = null;
   selectedId = sub.id;
   const w = workingCopy(sub), res = evaluate(sub), ccy = res.currency;
   const decision = decisions[sub.id];
@@ -4391,7 +4420,8 @@ function renderDetail() {
     whenLabel(sub),
   ].filter(Boolean).join(" · ");
   paintReading(sub);
-  paintOriginal(sub);
+  // The strip decides which of the claim's documents the panel below shows.
+  paintOriginal(paintDocStrip(sub) || sub);
 
   $("r-total").textContent = fmt(res.receiptTotal, ccy);
   // "0.00" next to nine claimable lines reads as "rejected". While something
@@ -6891,6 +6921,39 @@ const stale = (original) => !original || !original.at
 
 let receiptTab = "orig", currentOriginal = null;
 
+/* Which document of the claim is on screen, by submission id.
+ *
+ * Cleared whenever the claim changes, or opening the next claim would show the
+ * previous one's second attachment - a receipt from somebody else's purchase
+ * under this claim's figures, which is the worst way this could be wrong. */
+let openDoc = null;
+
+/** The documents strip, and the one currently showing. */
+function paintDocStrip(sub) {
+  const strip = $("doc-strip");
+  if (!strip) return null;
+  const docs = documentsFor(sub);
+  strip.textContent = "";
+  strip.hidden = docs.length < 2;
+  if (!docs.some(d => d.id === openDoc)) openDoc = sub.id;
+  if (docs.length < 2) return docs[0] || sub;
+
+  docs.forEach((d, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(d.id === openDoc));
+    // The filename, because that is what finance is looking for - "the
+    // invoice" and "the receipt" are the names on the paper, not a position.
+    b.textContent = d.receiptName || (i === 0 ? "Receipt" : `Document ${i + 1}`);
+    b.title = d.id === sub.id
+      ? "The document this claim was read from."
+      : `Arrived with it, in the same message. Claim ${esc(d.reference || "")}.`;
+    b.addEventListener("click", () => { openDoc = d.id; renderAll(); });
+    strip.appendChild(b);
+  });
+  return docs.find(d => d.id === openDoc) || sub;
+}
+
 const kb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB"
                 : n >= 1024    ? Math.round(n / 1024) + " KB" : n + " B";
 
@@ -8670,7 +8733,9 @@ function renderMineTabs(pending, closed) {
 }
 
 function renderMine() {
-  const mine = SUBMISSIONS.filter(isMine);
+  // One row per purchase. The companion is the same money on the same day from
+  // the same vendor, and listing it twice reads as having been charged twice.
+  const mine = SUBMISSIONS.filter(s => isMine(s) && !isCompanion(s));
   const closed = mine.filter(isClosed);
   const pending = mine.filter(s => !isClosed(s));
   const shown = mineSection === "closed" ? closed : pending;
@@ -8707,8 +8772,10 @@ function renderMine() {
 
     // Only offered where there is actually a file to open.
     const hasOriginal = !!sub.original || /^sub_/.test(sub.id);
+    const docs = documentsFor(sub).length;
     const link = hasOriginal
-      ? `<br><a class="rlink" role="button" tabindex="0" data-receipt="${esc(sub.id)}">receipt</a>` : "";
+      ? `<br><a class="rlink" role="button" tabindex="0" data-receipt="${esc(sub.id)}">receipt</a>`
+        + (docs > 1 ? `<span class="ident"> · ${docs} documents</span>` : "") : "";
 
     const tr = document.createElement("tr");
     opensClaim(tr, sub.id);
