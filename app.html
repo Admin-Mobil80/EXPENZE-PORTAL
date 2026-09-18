@@ -707,13 +707,19 @@ tr.yeartotal td { border-top:2px solid var(--rule-firm); font-weight:600;
    rather than as an outcome, which is the whole point: the verdict those
    buttons act on is being recomputed. */
 .stamp.working { color:var(--review); display:inline-flex; align-items:center; gap:8px; }
-.spin { width:11px; height:11px; border-radius:50%; flex:none;
+/* `busydot`, not `spin`. `.spin` was already taken - it is the refresh glyph
+   in the header, a static U+21BB that class only sizes - so adding an infinite
+   rotation under that name set the header arrow spinning on every page, for
+   ever, on a console that was not loading anything. A spinner that never stops
+   is the product telling everybody it is stuck.
+   Named for what it is here and scoped to nothing else. */
+.busydot { width:11px; height:11px; border-radius:50%; flex:none;
   border:2px solid var(--review); border-top-color:transparent;
-  animation:spin .8s linear infinite; }
-@keyframes spin { to { transform:rotate(360deg); } }
+  animation:busyspin .8s linear infinite; }
+@keyframes busyspin { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   /* Still a marker, just not a moving one. */
-  .spin { animation:none; border-top-color:var(--review); opacity:.45; }
+  .busydot { animation:none; border-top-color:var(--review); opacity:.45; }
 }
 
 /* rules view */
@@ -5094,7 +5100,7 @@ function renderDetail() {
     const s = document.createElement("span");
     s.className = "stamp working";
     const dot = document.createElement("span");
-    dot.className = "spin"; dot.setAttribute("aria-hidden", "true");
+    dot.className = "busydot"; dot.setAttribute("aria-hidden", "true");
     s.append(dot, document.createTextNode("Saving…"));
     s.setAttribute("role", "status");
     abox.appendChild(s);
