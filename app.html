@@ -1771,6 +1771,9 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
         <button class="btn primary" type="button" id="p-add">Send invitation</button>
       </div>
       <div class="msgwrap" id="people-msg-wrap" hidden><p class="msg" id="people-msg"></p></div>
+      <!-- Shown only on Pending, and only when something is actually old
+           enough to chase. -->
+      <button class="btn" type="button" id="people-chase" hidden></button>
       <div class="items-scroll">
         <table><thead><tr>
           <th scope="col">Person</th>
@@ -2693,6 +2696,10 @@ async function loadRecords() {
       whatsapp: p.whatsapp_channel === "active" ? "active"
               : p.whatsapp_channel === "pending" ? "pending" : null,
       status: p.status,
+      // When their invitation last went out - the original, or the most recent
+      // nudge - and how many times it has been sent.
+      invitedAt: p.invited_at || 0,
+      reinvites: p.reinvites || 0,
       // When their access was taken away, and by whom. Zero for everybody who
       // still has it.
       statusAt: p.status_changed_at || 0,
@@ -8034,6 +8041,22 @@ function renderPeople() {
     // over a list of people who accepted one and later lost access.
     ? `<strong>No longer on the roll.</strong><span>Nothing they send is accepted, and their claims are kept — a receipt somebody submitted is part of the record whether or not they still work here. Reinstate gives access back.</span>`
     : `<strong>Editing as ${currentUser.name}.</strong><span>Inviting someone does not start accepting their receipts. Email switches on when they accept; WhatsApp only once they add and verify their own number. ${pending ? pending + " invitation" + (pending === 1 ? "" : "s") + " outstanding." : "All invitations accepted."}</span>`;
+  /* Chase all of them at once, on the tab where that is the only job.
+   *
+   * Twenty-six outstanding invitations are twenty-six Resend buttons and
+   * twenty-six scrolls otherwise - which is why they stay outstanding. Only on
+   * Pending, and only when some are actually old enough: a button that would
+   * do nothing is worse than no button.
+   */
+  const chase = $("people-chase");
+  if (chase) {
+    const due = rw && peopleTab === "pending" ? PEOPLE.filter(mayReinvite).length : 0;
+    chase.hidden = !due;
+    chase.textContent = `Resend ${due} invitation${due === 1 ? "" : "s"}`;
+    chase.title = "Everyone invited more than 48 hours ago who has not signed in. "
+                + "Anyone invited more recently is left alone.";
+  }
+
   // The invite form belongs on the two tabs about people joining, not on the
   // one about people who have left.
   $("people-add").style.display = rw && peopleTab !== "inactive" ? "flex" : "none";
@@ -8125,7 +8148,19 @@ function renderPeople() {
                    + `</span>`
                  : "");
     } else if (person.invite !== "accepted") {
-      access = '<span class="state wait">invitation not accepted</span>';
+      /* How long it has been outstanding, and how often it has been sent.
+       *
+       * Twenty-six unaccepted invitations is mostly not twenty-six refusals -
+       * it is a message read on a phone and never dealt with. Saying how long
+       * it has sat is what turns a list into something somebody acts on. */
+      access = '<span class="state wait">invitation not accepted</span>'
+             + (person.invitedAt
+                 ? `<span class="whenby">sent ${esc(agoOf(person.invitedAt))}`
+                   + (person.reinvites
+                       ? ` · ${person.reinvites} reminder${person.reinvites === 1 ? "" : "s"}`
+                       : "")
+                   + `</span>`
+                 : "");
     } else {
       const bits = ['<span class="chan-on">email</span>'];
       if (person.whatsapp === "active") bits.push('<span class="chan-on">WhatsApp</span>');
@@ -8210,6 +8245,25 @@ function renderPeople() {
       });
       tr.querySelector(".actcell").appendChild(back);
     } else if (rw) {
+      /* Ask again, where asking again is the whole job.
+       *
+       * An outstanding invitation is usually not a refusal - it is a message
+       * read on a phone, meant to be dealt with later, and never dealt with.
+       * Offered beside Manage rather than buried inside it, because on the
+       * Pending tab it is the only thing anybody came to do.
+       *
+       * Absent, not disabled, before 48 hours. A greyed button on a person
+       * invited this morning invites a hunt for why; the row already says
+       * when it went out. */
+      if (mayReinvite(person)) {
+        const again = document.createElement("button");
+        again.className = "btn manage";
+        again.type = "button";
+        again.textContent = "Resend";
+        again.title = `Send the invitation to ${person.email} again.`;
+        again.addEventListener("click", () => resendInvite(person, again));
+        tr.querySelector(".actcell").appendChild(again);
+      }
       const manage = document.createElement("button");
       manage.className = "btn manage";
       manage.type = "button";
@@ -8650,6 +8704,65 @@ function renderApiKey(secret) {
   const box = $("ch-key-secret");
   box.hidden = !secret;
   if (secret) box.textContent = secret;
+}
+
+/* "3 days ago", from a unix second. Days, because this counts an invitation
+   somebody has not got round to rather than anything happening by the minute. */
+function agoOf(seconds) {
+  if (!seconds) return "";
+  const mins = Math.floor((Date.now() / 1000 - seconds) / 60);
+  if (mins < 60) return `${Math.max(1, mins)}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 48) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+/* Whether an invitation may be sent again: outstanding, and left alone long
+   enough that a second copy is a nudge rather than noise. The server holds the
+   same rule and enforces it - this only decides whether to offer the button. */
+const REINVITE_AFTER = 48 * 3600;
+const mayReinvite = (person) =>
+  person.invite === "pending" && !!person.invitedAt
+  && (Date.now() / 1000 - person.invitedAt) >= REINVITE_AFTER;
+
+/** Send one outstanding invitation again. */
+async function resendInvite(person, button) {
+  const was = button.textContent;
+  button.disabled = true; button.textContent = "Sending…";
+  const { ok, data } = await authCall("/member/reinvite", { email: person.email });
+  button.disabled = false; button.textContent = was;
+  if (!ok) return peopleMsg(data.error || "Could not send that invitation.", false);
+  peopleMsg(`Invitation sent again to ${person.name || person.email}.`, true);
+  await loadRecords();
+  renderAll();
+}
+
+/** Every outstanding invitation old enough to chase, sent again. */
+async function resendAllInvites(button) {
+  const due = PEOPLE.filter(mayReinvite);
+  if (!due.length) return;
+  // Named and counted before anything is sent. This puts a message in
+  // somebody's inbox - several dozen of them - and "resend all" is a phrase
+  // that hides how many that is.
+  if (!window.confirm(
+      `Send the invitation again to ${due.length} ${due.length === 1 ? "person" : "people"}?`
+      + `\n\nOnly those invited more than 48 hours ago and still not signed in.`
+      + `\nAnyone invited more recently is left alone.`)) return;
+
+  const was = button.textContent;
+  button.disabled = true;
+  let sent = 0, failed = 0;
+  for (const person of due) {
+    button.textContent = `Sending ${sent + failed + 1} of ${due.length}…`;
+    const { ok } = await authCall("/member/reinvite", { email: person.email });
+    ok ? sent++ : failed++;
+  }
+  button.disabled = false; button.textContent = was;
+  peopleMsg(failed
+    ? `${sent} sent, ${failed} could not be. The ones that failed are unchanged.`
+    : `Invitation sent again to ${sent} ${sent === 1 ? "person" : "people"}.`, !failed);
+  await loadRecords();
+  renderAll();
 }
 
 function stampOf(epoch) {
@@ -9495,6 +9608,7 @@ $("wa-prompt-go").addEventListener("click", () => {
 // on My expenses is always there for.
 $("wa-prompt-skip").addEventListener("click", answerWaPrompt);
 
+$("people-chase").addEventListener("click", (e) => resendAllInvites(e.target));
 $("audit-more").addEventListener("click", () => loadAuditLog(true));
 
 $("et-save").addEventListener("click", () => saveRules("et-save", "et-msg"));
