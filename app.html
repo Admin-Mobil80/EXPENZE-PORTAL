@@ -4028,8 +4028,20 @@ function renderClaimNav() {
   const home = claimHome(SUBMISSIONS.find(x => x.id === selectedId));
   // Counted from the list as it was opened, so a claim decided on the way
   // through keeps its place rather than shifting everything after it.
+  /* "1 of 3 in this set", not "1 of 3".
+   *
+   * The tab badge counts what is still undecided and this counts a position
+   * in the list as it was opened, so the moment a claim is decided the two
+   * disagree - "Review queue 2" in the strip above "Review queue · 1 of 3"
+   * below it. Both are right and neither says which question it is answering,
+   * so they read as one number the product cannot keep straight.
+   *
+   * Three words fix that without touching either number. Recomputing the
+   * position to match the badge is the wrong repair: it would renumber the
+   * sequence under somebody halfway through working it, which is the
+   * disorientation this page exists to remove. */
   $("claim-pos").textContent = "← " + (TAB_LABEL[home] || "Back")
-    + (stepping ? ` · ${at + 1} of ${claimSiblings.length}` : "");
+    + (stepping ? ` · ${at + 1} of ${claimSiblings.length} in this set` : "");
 
   /* Where the claim went, when it is no longer in the list this position
    * counts against.
@@ -5439,6 +5451,24 @@ function renderSettleOnClaim(sub, mayReview) {
 
   const c = payableClaims().find(x => x.sub.id === sub.id);
   if (!c || !mayReview || c.outstanding <= 0) return;
+
+  /* Not while somebody is working the review queue.
+   *
+   * Approving a claim out of the queue made the page it was on turn into a
+   * settlement page under the reviewer: the same claim, now carrying "owed to
+   * Reena K R" and a Record payment button, with "Review queue · 1 of 3"
+   * still above it. They had approved one claim of three and been handed a
+   * payment run.
+   *
+   * They are different jobs, usually different people, certainly different
+   * days - a reviewer decides what the company owes, finance moves the money.
+   * Doing the second in the middle of the first is not a shortcut, it is two
+   * roles on one screen with nothing marking where one ends. Pending
+   * settlement is one click away and is entirely about this.
+   *
+   * A claim opened *from* Pending settlement keeps the button, which is the
+   * case it was built for. */
+  if (claimFrom === "queue") return;
 
   // What the payment is made in. Not `res.currency`, which is what the receipt
   // was in - the transfer leaves the account in the organisation's own.
