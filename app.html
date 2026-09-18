@@ -3143,6 +3143,9 @@ function toClaim(s) {
     // The words the submitter was actually sent, stored by whichever path
     // sent them. See paintWhatTheyWereTold.
     lastNotice: s.last_notice || null,
+    // The claim this is a second document of. An invoice and its receipt
+    // arrive in one email and each becomes a claim; only one of them is one.
+    companionOf: s.companion_of || "",
   };
 }
 
@@ -3766,7 +3769,22 @@ const agentMayRelease = (sub) =>
   // A dropdown nobody has saved cannot be part of the answer.
   && AUTO_RELEASED.has(sub.serverVerdict || "");
 
+/* A second document of a claim, rather than a claim.
+ *
+ * An invoice and its receipt for one purchase arrive in one email, and every
+ * attachment becomes a submission - so a single subscription charge produced
+ * one approved claim and one flagged as a possible duplicate, waiting for
+ * somebody to confirm what the paper already said. Arriving in the same
+ * message, from one sender, carrying one invoice number is not a coincidence
+ * anybody needs to rule on.
+ *
+ * It is not rejected and not hidden: the document is evidence and its
+ * reference still resolves. It is simply not a second thing to decide or to
+ * pay. */
+const isCompanion = (sub) => !!sub.companionOf;
+
 const isQueued = (sub) => {
+  if (isCompanion(sub)) return false;
   // A claim being re-read *because a reviewer just corrected it* stays on the
   // list, marked as being read.
   //
@@ -4641,6 +4659,17 @@ function renderDetail() {
    *
    * Only where there are groups to choose from. An organisation that runs no
    * cost centres is not missing one. */
+  if (isCompanion(sub)) {
+    const row = document.createElement("div");
+    row.className = "violation";
+    const code = document.createElement("code"); code.textContent = "second_document";
+    const msg = document.createElement("span"); msg.className = "msg";
+    msg.textContent = `The same purchase as ${sub.companionOf}, which arrived in `
+      + `the same message — an invoice and its receipt. It is kept as evidence; `
+      + `${sub.companionOf} is the claim, and the credit for this one was returned.`;
+    row.append(code, msg); vbox.appendChild(row);
+  }
+
   const needsGroup = !decision && !stage
     && (ORG_PROFILE.groups || []).length && !groupOf(sub).id;
   if (needsGroup) {
@@ -7075,6 +7104,8 @@ function clearedByBadge(c) {
 function payableClaims() {
   const out = [];
   SUBMISSIONS.forEach(sub => {
+    // A second document of a claim is not a second thing to pay.
+    if (isCompanion(sub)) return;
     const res = evaluate(sub);
     const decision = decisions[sub.id];
 
