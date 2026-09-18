@@ -125,7 +125,12 @@ body { background:var(--paper); color:var(--ink); font-family:"Archivo",ui-sans-
 #view-rules, #view-billing, #view-channels { min-height:calc(100vh - 320px); }
 .nav button { font:inherit; font-size:.86rem; font-weight:500; padding:9px 15px; background:none; border:none; border-bottom:2px solid transparent; color:var(--muted); cursor:pointer; margin-bottom:-1px; display:inline-flex; align-items:center; gap:5px; }
 .nav button:hover { color:var(--ink); }
-.nav button[aria-current="true"] { color:var(--ink); border-bottom-color:var(--ink); font-weight:600; }
+/* The selected tab, unmistakably. A 2px rule and half a weight step is the
+   difference between "this one" and "possibly this one" at a glance across
+   eleven tabs - and the strip is read at a glance or not at all. */
+.nav button[aria-current="true"] { color:var(--ink); border-bottom-color:var(--ink);
+  border-bottom-width:3px; font-weight:700; background:var(--surface-2);
+  border-radius:var(--radius) var(--radius) 0 0; }
 .nav .lock { font-family:"IBM Plex Mono",monospace; font-size:.6rem; text-transform:uppercase; letter-spacing:.06em; border:1px solid var(--rule-firm); border-radius:var(--radius); padding:1px 5px; color:var(--muted); }
 /* The one break in the row: work to the left of it, settings to the right.
    Drawn as this tab's own left edge so that when the row wraps the line
@@ -167,6 +172,11 @@ body { background:var(--paper); color:var(--ink); font-family:"Archivo",ui-sans-
 .claimnav .pos { font-family:"IBM Plex Mono",monospace; font-size:.75rem;
   color:var(--muted); letter-spacing:.02em; }
 .claimnav .btn[disabled] { opacity:.4; cursor:default; }
+/* Where a decided claim went, beside the position it no longer holds. */
+.claimmoved { font-family:"IBM Plex Mono",monospace; font-size:.68rem;
+  color:var(--ok); background:var(--ok-bg); border-radius:var(--radius);
+  padding:4px 9px; }
+.claimmoved[hidden] { display:none; }
 /* On the claim page there is no list beside the detail, so the same split
    becomes one full-width column rather than a panel squeezed into 1.15fr. */
 /* The right-hand column of the review page: the verdict, then the receipt,
@@ -376,8 +386,11 @@ td.disp .yes { color:var(--ok); } td.disp .no { color:var(--bad); }
   cursor:pointer; margin-bottom:-1px;
   display:inline-flex; align-items:center; gap:5px; }
 .subtabs button:hover { color:var(--ink); }
+/* Matched to the top-level strip, so "which one am I on" is the same shape of
+   answer wherever it is asked. */
 .subtabs button[aria-current="true"] { color:var(--ink); border-bottom-color:var(--ink);
-  font-weight:600; }
+  border-bottom-width:3px; font-weight:700; background:var(--surface-2);
+  border-radius:var(--radius) var(--radius) 0 0; }
 /* An account with nothing in it yet. Says what is missing and how to fix it,
    rather than showing the working panels with no values in them. */
 .blankstate { padding:26px 22px; display:flex; flex-direction:column; gap:8px; }
@@ -2060,6 +2073,13 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <button class="btn" type="button" id="claim-prev">&larr; Previous</button>
       <button class="btn back" type="button" id="claim-pos"></button>
       <button class="btn" type="button" id="claim-next">Next &rarr;</button>
+      <!-- Said, because the position and the state can now disagree: "Review
+           queue · 1 of 3" beside a claim that was approved a moment ago is
+           two true statements that read as a contradiction. The position is
+           deliberately the list as it was opened - see `claimSiblings` - so
+           the thing to fix is the silence about where the claim went, not the
+           counting. -->
+      <span class="claimmoved" id="claim-moved" hidden></span>
     </nav>
     <div id="claim-slot" style="display:flex;flex-direction:column;gap:12px"></div>
     <!-- Outside the slot, so it is always last on the page and never follows
@@ -4010,6 +4030,34 @@ function renderClaimNav() {
   // through keeps its place rather than shifting everything after it.
   $("claim-pos").textContent = "← " + (TAB_LABEL[home] || "Back")
     + (stepping ? ` · ${at + 1} of ${claimSiblings.length}` : "");
+
+  /* Where the claim went, when it is no longer in the list this position
+   * counts against.
+   *
+   * Approving a claim out of the review queue leaves the reader on it -
+   * deliberately, because deciding a claim moves the claim and not the
+   * reader - with "Review queue · 1 of 3" still above it. Both halves are
+   * true and together they read as the product being confused: the claim is
+   * in Pending settlement and the bar still calls it first of three waiting.
+   *
+   * Naming the destination settles it, and does it without moving anybody:
+   * the sequence they were working through is intact, Next still steps to
+   * the next claim they were given, and the one they just decided says what
+   * became of it. */
+  const sub = SUBMISSIONS.find(x => x.id === selectedId);
+  const moved = $("claim-moved");
+  if (moved) {
+    const gone = sub && claimFrom === "queue" && !isQueued(sub)
+      ? (settlementStage(sub) ? "Settled"
+         : (decisions[sub.id] || {}).action === "Rejected" ? "Rejected"
+         : payableClaims().some(c => c.sub.id === sub.id) ? "Pending settlement"
+         : "")
+      : "";
+    moved.hidden = !gone;
+    moved.textContent = gone === "Rejected"
+      ? "Decided — it has left the review queue."
+      : `Decided — now in ${gone}.`;
+  }
 }
 
 /** Put the detail panels wherever they are being shown.
@@ -4211,10 +4259,20 @@ function renderNav() {
 
   const TABS = MANAGE_TABS.map(id => [id]);
 
+  /* On a claim page, the tab it was opened from stays lit.
+   *
+   * `view` is "claim" there, which matches no tab, so the whole strip went
+   * grey the moment somebody opened a claim - eleven tabs and no answer to
+   * "where am I". Opening a claim out of the review queue is not leaving the
+   * review queue, and the bar should say so. */
+  const lit = view === "claim"
+    ? claimHome(SUBMISSIONS.find(s => s.id === selectedId))
+    : view;
+
   TABS.forEach(([id]) => {
     const label = TAB_LABEL[id];
     const b = document.createElement("button"); b.type = "button";
-    b.setAttribute("aria-current", String(view===id));
+    b.setAttribute("aria-current", String(lit === id));
     // On the tab itself, not a separate element in the flow: the row wraps on
     // a narrow window, and a divider of its own would be left stranded at the
     // end of the first line instead of heading the second.
