@@ -245,6 +245,15 @@ td.why.dupe { color:var(--bad); font-weight:600; }
    and not another stage of it. */
 .v-settled{background:var(--ok);color:var(--paper);box-shadow:inset 3px 0 0 var(--ok);}
 .route { margin-left:auto; font-family:"IBM Plex Mono",monospace; font-size:.67rem; color:var(--muted); text-align:right; }
+/* A decided claim says so as a tag rather than as another line of grey mono.
+   The point is that a reviewer can tell at a glance there is nothing left to
+   do here and move to the next one. */
+.routetag { display:inline-block; font-family:"IBM Plex Mono",monospace;
+  font-size:.62rem; font-weight:600; text-transform:uppercase;
+  letter-spacing:.08em; border-radius:var(--radius); padding:3px 8px;
+  margin-right:8px; vertical-align:middle; }
+.routetag.bad { color:var(--bad); background:var(--bad-bg); }
+.routetag.ok { color:var(--ok); background:var(--ok-bg); }
 
 /* Three tiles, or four on a claim that needed converting. `auto-fit` rather
    than a fixed three: the fourth appears only sometimes, and empty tracks
@@ -593,11 +602,37 @@ tr.yeartotal td { border-top:2px solid var(--rule-firm); font-weight:600;
 .lightbox img { max-width:100%; max-height:100%; background:#fff; border-radius:var(--radius); }
 .lightbox iframe { width:min(880px,100%); height:100%; border:0; background:#fff;
   border-radius:var(--radius); }
+/* The viewport a zoomed receipt is panned inside. `overflow:hidden` is what
+   keeps a magnified bill from spilling over the page behind it, and it is the
+   reason zooming can stay here instead of opening the signed S3 URL in a tab
+   of its own. */
+.lbstage { position:relative; overflow:hidden; width:100%; height:100%;
+  display:flex; align-items:center; justify-content:center;
+  touch-action:none; cursor:zoom-in; }
+.lbstage.zoomed { cursor:grab; }
+.lbstage.zoomed.dragging { cursor:grabbing; }
+.lbstage img { transform-origin:center center; will-change:transform;
+  user-select:none; -webkit-user-drag:none; }
+.lbbar { position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:2px; z-index:2;
+  background:rgba(10,11,10,.72); border:1px solid rgba(255,255,255,.28);
+  border-radius:999px; padding:3px; }
+.lbbtn { font-family:"IBM Plex Mono",monospace; font-size:.7rem; line-height:1;
+  color:#fff; background:transparent; border:0; border-radius:999px;
+  padding:7px 11px; cursor:pointer; min-width:32px; }
+.lbbtn:hover { background:rgba(255,255,255,.16); }
+.lbbtn:disabled { opacity:.38; cursor:default; background:transparent; }
+.lbzoom { font-family:"IBM Plex Mono",monospace; font-size:.62rem; color:#fff;
+  letter-spacing:.06em; padding:0 8px; min-width:52px; text-align:center;
+  font-variant-numeric:tabular-nums; }
 .lbclose { position:absolute; top:18px; right:20px; font-family:"IBM Plex Mono",monospace;
   font-size:.65rem; text-transform:uppercase; letter-spacing:.06em; color:#fff;
   background:transparent; border:1px solid rgba(255,255,255,.42);
-  border-radius:var(--radius); padding:5px 11px; cursor:pointer; }
+  border-radius:var(--radius); padding:5px 11px; cursor:pointer; z-index:2; }
 .lbclose:hover { border-color:#fff; }
+.lbhint { position:absolute; top:20px; left:20px; z-index:2;
+  font-family:"IBM Plex Mono",monospace; font-size:.62rem; letter-spacing:.04em;
+  color:rgba(255,255,255,.62); }
 .rationale { padding:14px; font-family:"Source Serif 4",Georgia,serif; font-size:.96rem; line-height:1.6; color:var(--ink-2); border-left:3px solid var(--rule-firm); margin:0; max-width:68ch; }
 /* A settlement notice is a statement, not prose: figures in labelled lines
    that reconcile against a bank statement. Set in the mono face and kept on
@@ -1261,6 +1296,13 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
   <!-- ================= QUEUE VIEW ================= -->
   <div id="view-queue" style="display:flex;flex-direction:column;gap:20px">
 
+    <!-- Pending and Rejected, because a rejection used to make a claim vanish
+         from this screen entirely. A reviewer who refuses one has no way back
+         to it from where they were standing: the record is under Settled,
+         which is the tab about money that moved, and nothing moved. What they
+         just decided belongs beside what they are still deciding. -->
+    <nav class="subtabs" id="q-subtabs" aria-label="Review queue"></nav>
+
     <!-- What is waiting, and what it is worth. The queue counted claims and
          said nothing about money, so "two waiting" could be two coffees or two
          flights and the only way to find out was to open both. Pending
@@ -1310,7 +1352,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
              them makes the reader re-learn where to look for the submitter and
              the amount. -->
         <div class="items-scroll">
-          <table><thead><tr>
+          <table><thead><tr id="queue-head">
             <th scope="col">Submitted</th>
             <th scope="col">Receipt date</th>
             <th scope="col">Submitter</th>
@@ -1422,7 +1464,11 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
         <div class="rswitch" role="tablist" aria-label="How to view this receipt">
           <button type="button" class="rtab on" id="rtab-orig" role="tab" aria-selected="true">Original</button>
           <button type="button" class="rtab" id="rtab-text" role="tab" aria-selected="false">Text read</button>
-          <span class="rmeta"><span id="r-size"></span><a id="r-open" href="#" target="_blank" rel="noopener" hidden>Open full size</a></span>
+          <!-- Not a link. It used to be an anchor to the presigned S3 URL with
+               target="_blank", which put a self-authorising URL in the address
+               bar, in browser history, and one copy away from anybody. It
+               opens the receipt over this page instead, where it zooms. -->
+          <span class="rmeta"><span id="r-size"></span><button type="button" class="rlink" id="r-open" hidden>Zoom in</button></span>
         </div>
         <div class="original" id="original"></div>
         <div class="thermal" id="thermal" hidden></div>
@@ -1654,7 +1700,10 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
   <div id="view-payments" style="display:none;flex-direction:column;gap:20px">
     <section class="triage">
       <div class="queued"><span class="k">Awaiting payment</span><span class="v" id="p-await"></span><span class="note" id="p-await-note"></span></div>
-      <div><span class="k">Part settled</span><span class="v" id="p-part"></span><span class="note">Paid in instalments.</span></div>
+      <!-- No "Part settled" tile. Paying a claim in instalments is not
+           something this product tracks - finance does that in their own
+           process and records what they paid - so the tile was a permanent
+           zero taking a quarter of the row where the useful figures go. -->
       <div class="cleared"><span class="k">Settled</span><span class="v" id="p-done"></span><span class="note">Moved to the Settled tab.</span></div>
       <div class="rate"><span class="k">Outstanding</span><span class="v" id="p-outstanding"></span><span class="note">Owed to submitters right now.</span></div>
     </section>
@@ -4274,7 +4323,66 @@ function renderTriage() {
   $("t-queued-note").textContent = queued === 0 ? "Queue is clear." : "Blocked on a judgment the rules can't make.";
 }
 
+/* The two halves of a reviewer's own work.
+ *
+ * Rejecting a claim took it off this screen with nowhere on it to look: the
+ * record lives under Settled, which is the tab about money that moved, and a
+ * rejection is precisely the case where none did. So the reviewer who had
+ * just decided something could not get back to it from where they were
+ * standing, and had to go looking in a tab named after the opposite outcome.
+ */
+let queueTab = "pending";
+const QUEUE_TABS = [["pending", "Pending"], ["rejected", "Rejected"]];
+
+const rejectedClaims = () =>
+  SUBMISSIONS.filter(sub => claimStage(sub).stage === "rejected");
+
+/** The columns each sub-tab needs. Different questions, different headings.
+ *
+ * Pending asks what is blocked and what it is worth. Rejected asks who
+ * refused it and in what words - the reason is the whole point of keeping
+ * the list, because it is what the submitter was told. */
+const QUEUE_COLUMNS = {
+  pending: ["Submitted", "Receipt date", "Submitter", "Vendor", "Group",
+            ["Claimed", "right"]],
+  rejected: ["Rejected", "Submitter", "Vendor", "Rejected by", "Reason",
+             ["Claimed", "right"]],
+};
+
+function paintQueueHead() {
+  const head = $("queue-head");
+  if (!head) return;
+  head.textContent = "";
+  (QUEUE_COLUMNS[queueTab] || QUEUE_COLUMNS.pending).forEach(col => {
+    const [label, align] = Array.isArray(col) ? col : [col, ""];
+    const th = document.createElement("th");
+    th.scope = "col"; th.textContent = label;
+    if (align === "right") th.style.textAlign = "right";
+    head.appendChild(th);
+  });
+}
+
+function paintQueueTabs() {
+  const nav = $("q-subtabs");
+  if (!nav) return;
+  nav.textContent = "";
+  const counts = { pending: SUBMISSIONS.filter(isQueued).length,
+                   rejected: rejectedClaims().length };
+  QUEUE_TABS.forEach(([id, label]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = counts[id] ? `${label} (${counts[id]})` : label;
+    b.setAttribute("aria-current", String(queueTab === id));
+    b.addEventListener("click", () => { queueTab = id; renderQueue(); });
+    nav.appendChild(b);
+  });
+}
+
 function renderQueue() {
+  paintQueueTabs();
+  paintQueueHead();
+  if (queueTab === "rejected") return renderQueueRejected();
+
   const box = $("queue"); box.textContent = "";
   const queue = SUBMISSIONS.filter(isQueued);
   $("queue-count").textContent = queue.length === 0 ? "clear" : queue.length + " waiting";
@@ -4338,6 +4446,57 @@ function renderQueue() {
   wireClaimRows(box);
 }
 
+/** Claims this organisation refused, on the screen where they were refused.
+ *
+ * Every row opens the claim, so a rejection can be read back in full - the
+ * receipt, the findings and the notice the submitter was sent. Nothing here
+ * is actionable: a refusal is final, and the list exists so that somebody can
+ * point at one afterwards. */
+function renderQueueRejected() {
+  const box = $("queue"); box.textContent = "";
+  const rejected = rejectedClaims()
+    .sort((a, b) => ((b.review || {}).at || 0) - ((a.review || {}).at || 0));
+  $("queue-count").textContent = rejected.length
+    ? rejected.length + (rejected.length === 1 ? " claim" : " claims") : "none";
+
+  // The tiles count what is waiting, which is the other tab's question. They
+  // would read the same three numbers here and mean nothing by them.
+  const tiles = $("queue-tiles");
+  if (tiles) tiles.hidden = true;
+
+  const panel = $("split-queue"), blank = $("queue-blank");
+  if (panel) panel.hidden = false;
+  if (blank) blank.hidden = true;
+
+  if (!rejected.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="empty">Nothing has been rejected.</td>';
+    box.appendChild(tr);
+    return;
+  }
+
+  rejected.forEach(sub => {
+    const res = evaluate(sub);
+    const d = decisions[sub.id] || {};
+    const rev = sub.review || {};
+    const tr = document.createElement("tr");
+    opensClaim(tr, sub.id);
+    tr.innerHTML =
+      `<td class="day">${esc(d.at || dayStamp(rev.at) || "—")}</td>` +
+      `<td>${esc(sub.who)}</td>` +
+      `<td class="vend">${esc(sub.vendor)}${channelTag(sub.ch)}` +
+        (sub.reference ? `<span class="refno inline">${esc(sub.reference)}</span>` : "") +
+      `</td>` +
+      `<td>${esc(personName(d.by) || rev.by || "—")}</td>` +
+      // Word for word what the submitter was told. Without it a rejection is
+      // a fact nobody can review.
+      `<td class="reason">${esc(d.reason || rev.reason || "No reason recorded")}</td>` +
+      `<td class="amt">${fmt(res.receiptTotal, res.currency)}</td>`;
+    box.appendChild(tr);
+  });
+  wireClaimRows(box);
+}
+
 function renderDetail() {
   let sub = SUBMISSIONS.find(s => s.id === selectedId);
   if (view === "queue") {
@@ -4373,6 +4532,22 @@ function renderDetail() {
   splits.forEach(el => { el.hidden = false; });
 
   if (selectedId !== sub.id) openDoc = null;
+  /* The result line belongs to the claim it was written about.
+   *
+   * "Set to Courier in INR. Re-checking it against your policy." stayed on
+   * screen through Next, and sat over a different submitter's rejected
+   * medical bill saying something that had never been done to it. A comment
+   * here claimed `renderDetail` hid this on every pass; nothing did.
+   *
+   * Cleared on the way in rather than on the way out, because the message is
+   * written after a render: a reviewer's own result has to survive the
+   * re-render that follows their click, and only a *different* claim
+   * invalidates it. */
+  if (answerMsgFor && answerMsgFor !== sub.id) {
+    const stale = $("answer-msg");
+    if (stale) { stale.hidden = true; stale.textContent = ""; }
+    answerMsgFor = null;
+  }
   selectedId = sub.id;
   const w = workingCopy(sub), res = evaluate(sub), ccy = res.currency;
   const decision = decisions[sub.id];
@@ -4396,10 +4571,13 @@ function renderDetail() {
   const sentBackNow = sub.pulledBack && !decision && !stage;
   $("detail-who").textContent = (sub.reference ? sub.reference + " · " : "")
     + `${sub.who} · ${sub.vendor}`;
+  /* The verdict moves into the tag below, so the sentence here does not
+     repeat it: "REJECTED  by Riyad Rasheed · 17:46", not "REJECTED Rejected
+     by Riyad Rasheed · 17:46". */
   $("detail-route").textContent = stage
-    ? `${stage}${settledBy(sub) ? " by " + personName(settledBy(sub)) : ""}`
+    ? `${settledBy(sub) ? "by " + personName(settledBy(sub)) : ""}`
     : decision
-    ? `${decidedAs(decision.action)} by ${personName(decision.by)} · ${decision.at}`
+    ? `by ${personName(decision.by)} · ${decision.at}`
     // Who took it back out of the payment run, since the badge alone says a
     // state without saying whose doing it was.
     : sentBackNow
@@ -4419,6 +4597,25 @@ function renderDetail() {
              : "released by agent — not in the queue, see Pending settlement")
           : "not awaiting review")
       : "queued for human review";
+
+  /* A decided claim wears its decision as a tag.
+   *
+   * "Rejected by Riyad Rasheed · 17:46" was already printed here, in the same
+   * grey monospace as "queued for human review" and every other route line -
+   * so the one state that means *there is nothing more to do on this page*
+   * looked exactly like the states that mean the opposite. A reviewer working
+   * down the queue had to read the sentence to learn they could press Next.
+   *
+   * Rejected is red because it is the outcome somebody may need to defend;
+   * approved is green; the wording after it is unchanged. */
+  const tagWord = stage ? String(stage).trim().toUpperCase()
+                : decision ? decidedAs(decision.action).toUpperCase() : "";
+  if (tagWord) {
+    const tag = document.createElement("span");
+    tag.className = "routetag " + (/REJECT/.test(tagWord) ? "bad" : "ok");
+    tag.textContent = tagWord;
+    $("detail-route").prepend(tag);
+  }
   // How it arrived, and anything about the document itself a reviewer should
   // know before reading figures off it.
   /* The seller's registration, printed where a reviewer reads the rest of what
@@ -4657,8 +4854,16 @@ function renderDetail() {
   // own badge two lines above said APPROVED. The instruction only exists for
   // the case it names, so it is shown only in that case.
   const blocking = res.violations.some(v => v.blocking);
+  // A rejected claim is decided, and `locked` covers both decisions - so the
+  // hint beside these controls read "Approved. Correct anything here…" over a
+  // claim the same page had just stamped REJECTED, inviting a reviewer to
+  // re-type a claim that is going nowhere. Nothing needs correcting on a
+  // refusal: the tag and the reason say the whole of it.
+  const refused = !!decision && decision.action === "Rejected";
   $("controls-hint").textContent = paid
     ? "Reimbursed — what it was for is fixed now the money has moved."
+    : refused
+    ? "Rejected — nothing further is needed here."
     : locked
     // Approved and not yet paid. Editable, and worth saying what editing the
     // two that decide money will do, since it is not what Reopen does.
@@ -5304,9 +5509,9 @@ function capSummary(t) {
  *  Organisation tab shows the description, because that is what it is there
  *  to write. One list, two captions.
  */
-function renderTypeIndex(boxId, subtitle) {
+function renderTypeIndex(boxId, subtitle, onlyEnabled) {
   const q = typeFilter.trim().toLowerCase();
-  const shown = rules.types.filter(t =>
+  const shown = typesFor(onlyEnabled).filter(t =>
     !q || t.label.toLowerCase().includes(q) || t.id.includes(q));
 
   const idx = $(boxId); if (!idx) return;
@@ -5314,7 +5519,12 @@ function renderTypeIndex(boxId, subtitle) {
   if (!shown.length) {
     const p = document.createElement("p");
     p.className = "rules-empty";
-    p.textContent = rules.types.length ? "No type matches that." : "No expense types yet.";
+    p.textContent = !typesFor(onlyEnabled).length
+      ? (onlyEnabled
+         ? "No expense type is enabled. Turn one on under Organisation › "
+           + "Expense types."
+         : "No expense types yet.")
+      : "No type matches that.";
     idx.appendChild(p);
   }
   shown.forEach(t => {
@@ -5323,17 +5533,41 @@ function renderTypeIndex(boxId, subtitle) {
     b.type = "button";
     b.setAttribute("aria-current", String(t.id === selectedTypeId));
     b.innerHTML = `<span class="nm">${esc(t.label)}</span>` +
-      `<span class="dot ${t.enabled ? "" : "off"}" title="${t.enabled ? "enabled" : "disabled"}"></span>` +
+      // The state dot belongs where the state can be changed. On the Policy
+      // rules tab every type in the list is enabled, so a dot there says
+      // nothing and an "off" one says something nobody can act on.
+      (onlyEnabled ? "" :
+        `<span class="dot ${t.enabled ? "" : "off"}" title="${t.enabled ? "enabled" : "disabled"}"></span>`) +
       `<span class="cap">${subtitle(t)}</span>`;
     b.addEventListener("click", () => { selectedTypeId = t.id; renderAll(); });
     idx.appendChild(b);
   });
 }
 
-/** Both editors work on the same rule set, so both need a type selected. */
-function ensureSelectedType() {
-  if (!rules.types.some(t => t.id === selectedTypeId)) {
-    selectedTypeId = rules.types.length ? rules.types[0].id : null;
+/** The types one editor is about.
+ *
+ * Policy rules is about what an expense costs the company, and a disabled
+ * type costs it nothing: it judges no receipt, and every claim of that type
+ * goes to a human whatever its cap says. Listing them there put a rule in
+ * front of somebody that was not in force, tagged DISABLED, with no way to
+ * change that from the tab they were standing on - the panel could only point
+ * at Organisation. Which is the answer: a type that is off is a question
+ * about the organisation's vocabulary, not about its money.
+ */
+function typesFor(onlyEnabled) {
+  return onlyEnabled ? rules.types.filter(t => t.enabled) : rules.types;
+}
+
+/** Both editors work on the same rule set, so both need a type selected.
+ *
+ * `onlyEnabled` is passed by the rules tab, whose list is narrower: a
+ * selection made on the Organisation tab can be a type this one does not
+ * show, and leaving it selected would draw a rule with nothing highlighting
+ * it in the list beside it. */
+function ensureSelectedType(onlyEnabled) {
+  const list = typesFor(onlyEnabled);
+  if (!list.some(t => t.id === selectedTypeId)) {
+    selectedTypeId = list.length ? list[0].id : null;
   }
 }
 
@@ -5376,9 +5610,11 @@ function renderRules() {
   if (actions) actions.style.display = ro ? "none" : "";
   $("rt-filter").value = typeFilter;
 
-  ensureSelectedType();
+  // Enabled types only. See `typesFor`.
+  ensureSelectedType(true);
   renderTypeIndex("rules-index", t =>
-    `${capSummary(t)}${"" /* no requirements left to name */}${false ? " · itemised" : ""}`);
+    `${capSummary(t)}${"" /* no requirements left to name */}${false ? " · itemised" : ""}`,
+    true);
   renderRuleDetail(ro);
   renderImpact();
 }
@@ -5530,7 +5766,11 @@ function renderTypeDetail(ro) {
 /* What the rule *does* - the cap and what it demands before it can decide.
    Policy rules tab. Naming and deletion are under Organisation. */
 function renderRuleDetail(ro) {
-  const [box, t] = pickedType("rules-detail", "Select an expense type to see its rule.");
+  const [box, t] = pickedType("rules-detail",
+    rules.types.length
+      ? "No expense type is enabled, so no rule is in force. Turn one on under "
+        + "Organisation › Expense types."
+      : "Select an expense type to see its rule.");
   if (!t) return;
 
   // Which type this rule belongs to, since it cannot be renamed here. Plain
@@ -5542,10 +5782,10 @@ function renderRuleDetail(ro) {
   name.textContent = t.label;
   const tid = document.createElement("span"); tid.className = "tid"; tid.textContent = t.id;
   left.append(name, tid);
-  const state = document.createElement("span");
-  state.className = "state " + (t.enabled ? "on" : "off");
-  state.textContent = t.enabled ? "enabled" : "disabled";
-  head.append(left, state);
+  // No state tag. Everything this tab lists is enabled, so the tag could only
+  // ever read "enabled" - and when it read DISABLED it was a label on a rule
+  // nobody could act on from here.
+  head.append(left);
   box.appendChild(head);
   if (t.hint) {
     box.appendChild(Object.assign(document.createElement("p"),
@@ -7129,7 +7369,25 @@ function paintOriginal(sub, retried) {
 $("rtab-orig").addEventListener("click", () => { receiptTab = "orig"; applyReceiptTab(); });
 $("rtab-text").addEventListener("click", () => { receiptTab = "text"; applyReceiptTab(); });
 
-/** Show one original over the page. Nothing is downloaded to look at it. */
+const ZOOM_MIN = 1, ZOOM_MAX = 8, ZOOM_STEP = 1.4;
+
+/** Show one original over the page, zoomable and pannable where it stands.
+ *
+ * The reason this exists rather than a link: the original is fetched with a
+ * presigned S3 URL, and "open full size" put that URL in the address bar of a
+ * new tab, where it is in the browser's history, in anything syncing that
+ * history, and one copy-paste from being handed to somebody with no account -
+ * it authorises itself for as long as the signature lasts. A colleague's
+ * medical receipt should not become a link.
+ *
+ * So the URL stays where it already is - inside an <img> on a page that
+ * required a session to reach - and the thing the reader actually wanted from
+ * full size, which is reading the small print on a photographed bill, happens
+ * here: wheel or pinch to zoom, drag to pan, double-click to go in and back.
+ *
+ * Pan is clamped so the receipt cannot be dragged off its own stage and lost;
+ * at 1x it is centred and does not move at all.
+ */
 function openLightbox(original, label) {
   const box = document.createElement("div");
   box.className = "lightbox";
@@ -7137,25 +7395,142 @@ function openLightbox(original, label) {
   box.setAttribute("aria-modal", "true");
   box.setAttribute("aria-label", `Original receipt from ${label}`);
 
-  let node;
-  if (original.type === "application/pdf") {
-    node = document.createElement("iframe");
-    node.src = original.url; node.title = `Original receipt from ${label}`;
-  } else {
-    node = document.createElement("img");
-    node.src = original.url; node.alt = `Original receipt from ${label}, as submitted`;
-  }
   const close = document.createElement("button");
   close.type = "button"; close.className = "lbclose"; close.textContent = "Close";
-
   const dismiss = () => { box.remove(); document.removeEventListener("keydown", onKey); };
-  const onKey = (e) => { if (e.key === "Escape") dismiss(); };
+  let onKey = (e) => { if (e.key === "Escape") dismiss(); };
   close.addEventListener("click", dismiss);
   box.addEventListener("click", e => { if (e.target === box) dismiss(); });
+
+  // A PDF keeps the browser's own viewer, which already zooms, scrolls and
+  // prints. Reimplementing that over an iframe would be worse at all three.
+  if (original.type === "application/pdf") {
+    const frame = document.createElement("iframe");
+    frame.src = original.url; frame.title = `Original receipt from ${label}`;
+    document.addEventListener("keydown", onKey);
+    box.append(frame, close);
+    document.body.appendChild(box);
+    close.focus();
+    return;
+  }
+
+  const stage = document.createElement("div");
+  stage.className = "lbstage";
+  const img = document.createElement("img");
+  img.src = original.url;
+  img.alt = `Original receipt from ${label}, as submitted`;
+  img.draggable = false;
+  stage.appendChild(img);
+
+  let scale = 1, tx = 0, ty = 0, dragging = false, lastX = 0, lastY = 0;
+
+  /** Keep the image overlapping its stage.
+   *
+   * Without this a firm drag flings the receipt out of view and the only way
+   * back is to close the panel and reopen it. The allowance is half the
+   * overhang in each direction, which is exactly the range in which some part
+   * of the image is still on screen. */
+  function clamp() {
+    // `offsetWidth` is the laid-out size and ignores the transform, so this
+    // is the size the image is *about* to be. Measuring the rendered box
+    // instead would measure the scale we are replacing, and the clamp would
+    // always be one zoom step behind.
+    const w = img.offsetWidth * scale, h = img.offsetHeight * scale;
+    const maxX = Math.max(0, (w - stage.clientWidth) / 2);
+    const maxY = Math.max(0, (h - stage.clientHeight) / 2);
+    tx = Math.min(maxX, Math.max(-maxX, tx));
+    ty = Math.min(maxY, Math.max(-maxY, ty));
+  }
+
+  function paint() {
+    clamp();
+    img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    stage.classList.toggle("zoomed", scale > 1);
+    pct.textContent = Math.round(scale * 100) + "%";
+    out.disabled = scale <= ZOOM_MIN;
+    into.disabled = scale >= ZOOM_MAX;
+    reset.disabled = scale === 1 && tx === 0 && ty === 0;
+  }
+
+  /** Zoom about a point, so what is under the cursor stays under it.
+   *
+   * Zooming about the centre instead means the detail somebody is pointing at
+   * slides away from them as they magnify it, and they chase it with the
+   * mouse. `at` is a client point; omitted, it is the middle of the stage. */
+  function zoomTo(next, at) {
+    next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+    const s = stage.getBoundingClientRect();
+    const px = at ? at.x - (s.left + s.width / 2) : 0;
+    const py = at ? at.y - (s.top + s.height / 2) : 0;
+    const k = next / scale;
+    tx = px - (px - tx) * k;
+    ty = py - (py - ty) * k;
+    scale = next;
+    if (scale === 1) { tx = 0; ty = 0; }
+    paint();
+  }
+
+  stage.addEventListener("wheel", e => {
+    e.preventDefault();
+    zoomTo(scale * (e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP),
+           { x: e.clientX, y: e.clientY });
+  }, { passive: false });
+
+  stage.addEventListener("dblclick", e => {
+    zoomTo(scale > 1 ? 1 : 2.5, { x: e.clientX, y: e.clientY });
+  });
+
+  stage.addEventListener("pointerdown", e => {
+    if (scale <= 1) return;
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    stage.classList.add("dragging");
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener("pointermove", e => {
+    if (!dragging) return;
+    tx += e.clientX - lastX; ty += e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    paint();
+  });
+  const drop = (e) => {
+    if (!dragging) return;
+    dragging = false; stage.classList.remove("dragging");
+    try { stage.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+  stage.addEventListener("pointerup", drop);
+  stage.addEventListener("pointercancel", drop);
+
+  // Controls, for the reader who does not know a receipt can be scrolled on.
+  const bar = document.createElement("div"); bar.className = "lbbar";
+  const mk = (text, title, fn) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "lbbtn"; b.textContent = text;
+    b.title = title; b.setAttribute("aria-label", title);
+    b.addEventListener("click", fn);
+    return b;
+  };
+  const out = mk("−", "Zoom out", () => zoomTo(scale / ZOOM_STEP));
+  const pct = document.createElement("span");
+  pct.className = "lbzoom";
+  const into = mk("+", "Zoom in", () => zoomTo(scale * ZOOM_STEP));
+  const reset = mk("Fit", "Fit the whole receipt", () => { scale = 1; tx = 0; ty = 0; paint(); });
+  bar.append(out, pct, into, reset);
+
+  const hint = document.createElement("p");
+  hint.className = "lbhint";
+  hint.textContent = "Scroll or double-click to zoom · drag to pan";
+
+  onKey = (e) => {
+    if (e.key === "Escape") return dismiss();
+    if (e.key === "+" || e.key === "=") { e.preventDefault(); zoomTo(scale * ZOOM_STEP); }
+    if (e.key === "-" || e.key === "_") { e.preventDefault(); zoomTo(scale / ZOOM_STEP); }
+    if (e.key === "0") { e.preventDefault(); scale = 1; tx = 0; ty = 0; paint(); }
+  };
   document.addEventListener("keydown", onKey);
 
-  box.append(node, close);
+  box.append(stage, bar, hint, close);
   document.body.appendChild(box);
+  paint();
   close.focus();
 }
 
@@ -7249,7 +7624,9 @@ function renderPayments() {
   // Every claim on this list is awaiting reimbursement, so "Paid" is a column
   // of dashes unless somebody has part paid one - taking width from the
   // figures beside it that do say something. It appears when it has something
-  // to say, and the empty state above already counts part settlements.
+  // to say. The tile that used to count these is gone; the column stays,
+  // because a claim that has had money against it and still shows an
+  // outstanding balance is exactly the row a finance executive must see.
   const anyPartPaid = part.length > 0;
   const paidHead = $("pay-paid-head");
   if (paidHead) paidHead.hidden = !anyPartPaid;
@@ -7268,7 +7645,6 @@ function renderPayments() {
 
   $("p-await").textContent = awaiting.length;
   $("p-await-note").textContent = awaiting.length ? "Cleared, not yet reimbursed." : "Nothing owed.";
-  $("p-part").textContent = part.length;
   $("p-done").textContent = done.length;
   $("p-outstanding").textContent = outstandingText;
   $("p-outstanding").style.fontSize = outstandingText.length > 12 ? "1.05rem" : "";
@@ -9325,6 +9701,9 @@ $("etype").addEventListener("change", e => {
  * A named function has no such state to get wrong.
  */
 let retypeBusy = false;
+// Which claim the line under the controls is about, so it can be dropped when
+// the page moves to another one. See `renderDetail`.
+let answerMsgFor = null;
 
 async function saveAndRecheck() {
   const sub = SUBMISSIONS.find(s => s.id === selectedId);
@@ -9339,6 +9718,8 @@ async function saveAndRecheck() {
     msg.hidden = false;
     msg.className = "msg " + (good ? "ok" : "err");
     msg.textContent = text;
+    // Stamped with the claim, so moving to another one takes it away.
+    answerMsgFor = sub.id;
   };
   if (!rules.types.some(t => t.enabled && t.id === chosen)) {
     return show("Pick one of your configured expense types.", false);
@@ -9659,7 +10040,15 @@ $("et-new").addEventListener("click", () => {
     // that claims point at this id and it must never move under them.
     _fresh: true,
     id, label: "New expense type", hint: "",
-    enabled: false,           // off until it has been configured
+    // Enabled. It was born disabled - "off until it has been configured" -
+    // which sounds careful and was the wrong default twice over. Nobody adds
+    // an expense type they do not want used, so the extra step was on the
+    // path everybody takes; and the switch that undoes it lives on a
+    // different tab from the cap, so a type added here and capped there was
+    // still off, wearing a DISABLED tag on a rule with no way to clear it.
+    // A type that is on and uncapped is not a hole either: no cap means the
+    // claim is judged on everything else and lands in front of a person.
+    enabled: true,
     // In the organisation's own currency, not a hardcoded rupee. A type born
     // with a cap in a currency the company never receives is a type whose
     // every claim goes to a reviewer the day it is enabled.
@@ -9667,7 +10056,7 @@ $("et-new").addEventListener("click", () => {
   });
   selectedTypeId = id;
   typeFilter = "";
-  bump(`Created a new expense type (disabled until configured).`);
+  bump(`Created a new expense type.`);
   renderAll();
   const title = document.querySelector("#et-detail input.title");
   if (title) { title.focus(); title.select(); }
