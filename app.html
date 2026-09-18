@@ -7491,7 +7491,30 @@ function paintOriginal(sub, retried) {
     box.appendChild(img);
   }
 
-  $("r-open").href = currentOriginal ? currentOriginal.url : "#";
+  /* Open it over the page, zoomable.
+   *
+   * This was `$("r-open").href = …`, which was right while the control was an
+   * anchor to the presigned S3 URL. It became a <button> when that link was
+   * removed - the URL authorises itself and belongs nowhere near an address
+   * bar - and setting `.href` on a button assigns a property nothing reads.
+   * No handler was attached in its place, so the control rendered, looked
+   * live, and did nothing at all.
+   *
+   * Reassigned on every paint rather than wired once at load: the button
+   * outlives the claim, and a listener added at load would have to reach for
+   * whichever original is current through a variable that has since moved.
+   * `onclick` replaces rather than stacks, so repainting cannot leave two.
+   */
+  const zoom = $("r-open");
+  if (zoom) {
+    const original = currentOriginal;
+    zoom.onclick = original
+      ? () => openLightbox(original, sub.vendor || "this claim")
+      : null;
+    zoom.disabled = !original;
+    zoom.textContent = original && original.type === "application/pdf"
+      ? "Open full size" : "Zoom in";
+  }
   applyReceiptTab();
 }
 
