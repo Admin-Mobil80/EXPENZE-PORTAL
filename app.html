@@ -2578,7 +2578,22 @@ async function loadChannels() {
   // Become the person who signed in, rather than the persona in the URL.
   if (data.email) {
     LIVE = data;
-    const tier = ["owner", "finance", "staff"].includes(data.role) ? data.role : "staff";
+    /* Whatever role the server says, checked against the roles that exist.
+     *
+     * This was a literal list - owner, finance, staff - written before
+     * administrators were a role, and anything not on it fell through to
+     * "staff". So every administrator who signed in was silently made a
+     * submitter: the header said SUBMITTER under their name, the
+     * Administration tab was not drawn, and the only thing they could reach
+     * was their own receipts. Their membership row said `admin` the whole
+     * time; nothing was wrong with their access, only with what the console
+     * believed about it.
+     *
+     * RANK is the list of roles, so it is the thing to ask. A role added
+     * later is then known here the moment it is added, instead of quietly
+     * demoting everybody who holds it. */
+    const tier = Object.prototype.hasOwnProperty.call(RANK, data.role)
+      ? data.role : "staff";
     currentUser = {
       id: "me",
       name: data.name || data.email,
@@ -3838,7 +3853,11 @@ const isQueued = (sub) => {
 /* What the managing surface is called, by role. A Finance Executive does not
    administer the organisation and an owner does more than finance, so neither
    is served by one generic word. */
-const ROLE_SURFACE = { owner: "Administration", finance: "Finance" };
+// What the second tab is called for each role. An administrator was missing
+// here too, and fell through to the generic "Manage" - the same omission as
+// the sign-in tier list, in a different place.
+const ROLE_SURFACE = { owner: "Administration", admin: "Administration",
+                       finance: "Finance" };
 const HOME_TAB = { owner: "reports", admin: "reports", finance: "payments" };
 
 const TAB_LABEL = {
