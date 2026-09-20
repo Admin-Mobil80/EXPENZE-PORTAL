@@ -1631,7 +1631,6 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
           <th scope="col">Month</th>
           <th scope="col" style="text-align:right">Receipts</th>
           <th scope="col" style="text-align:right">Claimed</th>
-          <th scope="col" style="text-align:right">Reimbursable</th>
           <th scope="col" style="text-align:right">Settled</th>
           <th scope="col">Share of the year</th>
         </tr></thead><tbody id="r-months"></tbody></table>
@@ -1664,10 +1663,22 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       </header>
       <div class="items-scroll">
         <table><thead><tr>
+          <!-- No "Reimbursable" column, here or in the three reports beside
+               this one. It was the engine's arithmetic from when a verdict
+               computed a fraction of a claim - a per-head cap times a
+               headcount, an itemisation requirement, a disallowed figure -
+               and none of that exists now. A claim is worth what the receipt
+               says; either the agent clears it or a person decides it, and
+               what they decide is the whole amount. So the column printed the
+               claimed total again on nearly every row, and on the rows where
+               it did not it was quietly excluding claims that had been
+               refused - which is what Settled and the queue counts are for.
+               Claimed, Settled and the auto-clear rate are three questions
+               with three different answers; this was a fourth column with no
+               fourth question. -->
           <th scope="col">Expense type</th>
           <th scope="col" style="text-align:right">Receipts</th>
           <th scope="col" style="text-align:right">Claimed</th>
-          <th scope="col" style="text-align:right">Reimbursable</th>
           <th scope="col" style="text-align:right">Settled</th>
           <th scope="col" style="text-align:right">Auto-cleared</th>
         </tr></thead><tbody id="r-types"></tbody></table>
@@ -1687,7 +1698,6 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
           <th scope="col">Group</th>
           <th scope="col" style="text-align:right">Receipts</th>
           <th scope="col" style="text-align:right">Claimed</th>
-          <th scope="col" style="text-align:right">Reimbursable</th>
           <th scope="col" style="text-align:right">Settled</th>
           <th scope="col">Share of spend</th>
         </tr></thead><tbody id="r-groups"></tbody></table>
@@ -1710,7 +1720,6 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
           <th scope="col">Person</th>
           <th scope="col" style="text-align:right">Receipts</th>
           <th scope="col" style="text-align:right">Claimed</th>
-          <th scope="col" style="text-align:right">Reimbursable</th>
           <th scope="col" style="text-align:right">Settled</th>
           <th scope="col">Share of spend</th>
         </tr></thead><tbody id="r-users"></tbody></table>
@@ -6797,7 +6806,6 @@ function renderByMonth() {
     const add = (f) => all.reduce((t, r) => t + f(r), 0);
     return { i, label, count: all.length,
              claimed: add(r => r.claimed),
-             reimb: add(r => r.reimb),
              // Money out, against the month the receipt belongs to rather
              // than the month it was paid in: this table answers "what did
              // September cost", and a September dinner paid in October is
@@ -6807,9 +6815,8 @@ function renderByMonth() {
 
   const totals = months.reduce((t, m) => ({
     count: t.count + m.count, claimed: t.claimed + m.claimed,
-    reimb: t.reimb + m.reimb,
     settled: t.settled + m.settled,
-  }), { count: 0, claimed: 0, reimb: 0, dis: 0, settled: 0 });
+  }), { count: 0, claimed: 0, settled: 0 });
   const share = Math.max(1, totals.claimed);
   const active = months.filter(m => m.count).length;
   $("r-month-sub").textContent = active
@@ -6837,7 +6844,6 @@ function renderByMonth() {
     tr.innerHTML +=
       `<td class="n">${m.count || (ahead ? "" : "0")}</td>` +
       `<td class="n">${m.claimed ? fmt(m.claimed, ccy) : (ahead ? "not yet" : "—")}</td>` +
-      `<td class="n" style="color:var(--ok)">${m.reimb ? fmt(m.reimb, ccy) : "—"}</td>` +
       `<td class="n" style="color:${m.settled ? "var(--ok)" : "inherit"}">${m.settled ? fmt(m.settled, ccy) : (ahead ? "" : "—")}</td>` +
       `<td><span class="minibar"><i style="width:${pct}%"></i></span>` +
       `<span class="gid" style="margin-left:7px">${m.claimed ? pct + "%" : "—"}</span></td>`;
@@ -6852,7 +6858,6 @@ function renderByMonth() {
     `<td>${year}</td>` +
     `<td class="n">${totals.count}</td>` +
     `<td class="n">${fmt(totals.claimed, ccy)}</td>` +
-    `<td class="n" style="color:var(--ok)">${fmt(totals.reimb, ccy)}</td>` +
     `<td class="n" style="color:${totals.settled ? "var(--ok)" : "inherit"}">` +
       `${totals.settled ? fmt(totals.settled, ccy) : "—"}</td>` +
     `<td class="gid">${active} of 12 months</td>`;
@@ -6879,9 +6884,9 @@ function renderEmptyPeriod() {
     tb.appendChild(tr);
   };
   const msg = `No receipts in ${periodLabel()}. Pick another month above.`;
-  blank("r-types", 6, msg);
-  blank("r-groups", 6, msg);
-  blank("r-users", 6, msg);
+  blank("r-types", 5, msg);
+  blank("r-groups", 5, msg);
+  blank("r-users", 5, msg);
   ["r-cats", "intake"].forEach(id => {
     const box = $(id); if (!box) return;
     box.textContent = "";
@@ -7008,7 +7013,6 @@ function renderReports() {
       label: rule ? rule.label : t + " (no rule)",
       count: all.length,
       claimed: sum(all, r => r.claimed),
-      reimb: sum(all, r => r.reimb),
       settled: sum(all, r => r.settled),
       auto: Math.round(auto / all.length * 100),
     };
@@ -7017,7 +7021,6 @@ function renderReports() {
     tr.innerHTML = `<td>${t.label}</td>` +
       `<td class="n">${t.count}</td>` +
       `<td class="n">${t.claimed ? fmt(t.claimed, home) : "—"}</td>` +
-      `<td class="n" style="color:var(--ok)">${t.reimb ? fmt(t.reimb, home) : "—"}</td>` +
       `<td class="n" style="color:${t.settled ? "var(--ok)" : "inherit"}">${t.settled ? fmt(t.settled, home) : "—"}</td>` +
       `<td class="n">${t.auto}%</td>`;
     tb.appendChild(tr);
@@ -7041,7 +7044,6 @@ function renderReports() {
       return {
         label: b.label, loose: b.loose, count: b.rows.length,
         claimed: sum(b.rows, r => r.claimed),
-        reimb: sum(b.rows, r => r.reimb),
         settled: sum(b.rows, r => r.settled),
       };
     })
@@ -7061,7 +7063,6 @@ function renderReports() {
       `<td>${g.loose ? `<span class="state off">${g.label}</span>` : g.label}</td>` +
       `<td class="n">${g.count}</td>` +
       `<td class="n">${g.claimed ? fmt(g.claimed, home) : "—"}</td>` +
-      `<td class="n" style="color:var(--ok)">${g.reimb ? fmt(g.reimb, home) : "—"}</td>` +
       `<td class="n" style="color:${g.settled ? "var(--ok)" : "inherit"}">${g.settled ? fmt(g.settled, home) : "—"}</td>` +
       `<td><span class="minibar"><i style="width:${pct}%"></i></span>` +
       `<span class="gid" style="margin-left:7px">${g.claimed ? pct + "%" : "—"}</span></td>`;
@@ -7095,7 +7096,6 @@ function renderReports() {
       email: b.who,
       count: b.rows.length,
       claimed: sum(b.rows, r => r.claimed),
-      reimb: sum(b.rows, r => r.reimb),
       settled: sum(b.rows, r => r.settled),
     };
   }).sort((a, b) => b.claimed - a.claimed || b.count - a.count);
@@ -7108,7 +7108,7 @@ function renderReports() {
   const ub = $("r-users"); ub.textContent = "";
   if (!userRows.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="7" class="empty">No receipts in ${periodLabel()}.</td>`;
+    tr.innerHTML = `<td colspan="5" class="empty">No receipts in ${periodLabel()}.</td>`;
     ub.appendChild(tr);
   }
   userRows.forEach(u => {
@@ -7119,7 +7119,6 @@ function renderReports() {
         `<div class="pmeta">${esc(u.email)}</div></td>` +
       `<td class="n">${u.count}</td>` +
       `<td class="n">${u.claimed ? fmt(u.claimed, home) : "—"}</td>` +
-      `<td class="n" style="color:var(--ok)">${u.reimb ? fmt(u.reimb, home) : "—"}</td>` +
       `<td class="n" style="color:${u.settled ? "var(--ok)" : "inherit"}">${u.settled ? fmt(u.settled, home) : "—"}</td>` +
       `<td><span class="minibar"><i style="width:${pct}%"></i></span>` +
       `<span class="gid" style="margin-left:7px">${u.claimed ? pct + "%" : "—"}</span></td>`;
