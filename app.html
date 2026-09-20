@@ -1846,6 +1846,65 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
   </div>
 
   <!-- ================= SETTLED ================= -->
+  <!-- ================= ADVANCES ================= -->
+  <div id="view-advances" style="display:none;flex-direction:column;gap:20px">
+    <section class="tiles4" id="adv-tiles">
+      <div><span class="k">Float holders</span><span class="v" id="adv-count"></span>
+        <span class="note">People holding the company's cash.</span></div>
+      <div><span class="k">Still out</span><span class="v" id="adv-held"></span>
+        <span class="note" id="adv-held-note"></span></div>
+      <div><span class="k">Advanced in total</span><span class="v" id="adv-paid"></span>
+        <span class="note">Cash handed over, less anything given back.</span></div>
+      <div><span class="k">In flight</span><span class="v" id="adv-gap"></span>
+        <span class="note">Spent by a holder and not yet settled.</span></div>
+    </section>
+
+    <section class="panel">
+      <header><h2>The float</h2><span class="sub" id="adv-sub"></span></header>
+      <div class="banner" id="adv-banner"></div>
+      <div class="items-scroll">
+        <table><thead><tr>
+          <th scope="col">Holder</th>
+          <th scope="col" style="text-align:right">Advanced</th>
+          <!-- Claims settled against the advance. Not claims *paid* - a
+               separate payout reimburses them without touching the float, and
+               folding the two together is how a replenishment gets
+               calculated against a balance that never moved. -->
+          <th scope="col" style="text-align:right">Settled from it</th>
+          <th scope="col" style="text-align:right">Still out</th>
+          <!-- Spent and not yet settled. The cash has left their hands and
+               the advance has not been drawn down for it, so it sits between
+               the two figures rather than inside either. -->
+          <th scope="col" style="text-align:right">In flight</th>
+          <!-- Still out less what is in flight. A worst case while claims are
+               undecided, since none of them has been assigned to the float
+               yet - it settles as finance chooses. -->
+          <th scope="col" style="text-align:right">In hand</th>
+          <th scope="col">Last movement</th>
+        </tr></thead><tbody id="adv-list"></tbody></table>
+      </div>
+      <div class="formrow" id="adv-actions">
+        <button class="btn primary" type="button" id="adv-new">+ Record an advance</button>
+        <p class="msg" id="adv-msg" hidden style="padding:0"></p>
+      </div>
+      <div id="adv-form" hidden></div>
+    </section>
+
+    <section class="panel">
+      <header><h2>Movements</h2><span class="sub" id="adv-log-sub"></span></header>
+      <div class="items-scroll">
+        <table><thead><tr>
+          <th scope="col">When</th>
+          <th scope="col">Holder</th>
+          <th scope="col">What</th>
+          <th scope="col" style="text-align:right">Amount</th>
+          <th scope="col">Recorded by</th>
+          <th scope="col">Note</th>
+        </tr></thead><tbody id="adv-log"></tbody></table>
+      </div>
+    </section>
+  </div>
+
   <div id="view-settled" style="display:none;flex-direction:column;gap:20px">
     <nav class="subtabs" id="s-subtabs" aria-label="Settlement history">
       <span class="tabaside">showing <select id="done-period" class="ccysel"></select></span>
@@ -2859,6 +2918,7 @@ async function loadRecords() {
     }
   }
 
+  await loadAdvances();
   const led = await authCall("/credits/ledger", {});
   if (led.ok && Array.isArray(led.data.entries)) ledger = led.data.entries;
 
@@ -4040,6 +4100,7 @@ const HOME_TAB = { owner: "reports", admin: "reports", finance: "payments" };
 const TAB_LABEL = {
   mine: "My expenses", reports: "Reports", queue: "Review queue",
   payments: "Pending settlement", settled: "Settled", people: "People",
+  advances: "Advances",
   budgets: "Budgets", rules: "Policy rules", billing: "Credits",
   org: "Organisation", channels: "Channels & API",
 };
@@ -4302,7 +4363,7 @@ function renderSession() {
  * person is wearing. Approve and Reject live in the managing surface for
  * exactly that reason.
  */
-const MANAGE_TABS = ["queue", "payments", "settled", "reports",
+const MANAGE_TABS = ["queue", "payments", "settled", "advances", "reports",
                      "people", "budgets", "rules", "billing", "org", "channels"];
 
 /* Where the tabs stop being work and start being settings.
@@ -4454,8 +4515,8 @@ function renderNav() {
   showView();
 }
 
-const ALL_VIEWS = ["mine","reports","queue","payments","settled","people",
-                   "budgets","rules","billing","org","channels","claim"];
+const ALL_VIEWS = ["mine","reports","queue","payments","settled","advances",
+                   "people","budgets","rules","billing","org","channels","claim"];
 
 function showView() {
   ALL_VIEWS.forEach(v => {
@@ -8443,6 +8504,12 @@ function settleForm(c, ccy) {
             // rate it was struck at without opening anything.
             c.rate ? ` ${esc(fmt(c.original, c.from))} at ${esc(c.rate)}.` : ""
           } Lower it to part settle.</span></div>
+        <div class="sf" id="sf-source-wrap" hidden><label for="sf-source">Settle from</label>
+          <select id="sf-source">
+            <option value="float">Their float</option>
+            <option value="payout">A separate payout</option>
+          </select>
+          <span class="sf-hint" id="sf-source-hint"></span></div>
         <div class="sf"><label for="sf-mode">Mode of payment</label>
           <select id="sf-mode">${PAY_MODES.map(m => `<option value="${m}">${m}</option>`).join("")}</select></div>
         <div class="sf"><label for="sf-ref">Transaction reference</label>
@@ -8505,8 +8572,50 @@ function settleForm(c, ccy) {
       ref: td.querySelector("#sf-ref").value.trim(),
       note: td.querySelector("#sf-note").value.trim(),
       paidOn: td.querySelector("#sf-date").value,
+      // Absent for everybody who holds no float, and the server reads
+      // anything that is not "float" as an ordinary payout.
+      source: (td.querySelector("#sf-source") || {}).value || "payout",
     });
   });
+
+  /* Where this one comes from, when the claimant is holding a float.
+   *
+   * Two genuinely different acts wearing one word. Settling *from the float*
+   * moves no money: they already spent the company's cash, and this is the
+   * company accounting for it, so their advance is drawn down. A *separate
+   * payout* is an ordinary reimbursement - a bill too large for the float, or
+   * one they paid personally - and it leaves the float alone.
+   *
+   * Only shown for somebody who holds one. For everybody else there is no
+   * choice to make and a dropdown with one real option is furniture.
+   */
+  const float0 = (ADVANCES.holders || []).find(
+    h => (h.email || "").toLowerCase() === String(c.sub.whoEmail || "").toLowerCase());
+  const srcWrap = td.querySelector("#sf-source-wrap");
+  if (float0 && srcWrap) {
+    srcWrap.hidden = false;
+    const inHand = advMinor(float0.in_hand);
+    const sel = td.querySelector("#sf-source");
+    const hint = td.querySelector("#sf-source-hint");
+    // Defaulted to whichever is true rather than to one of them always: a
+    // claim inside the float is the ordinary case, and one beyond it cannot
+    // come out of money they do not have.
+    const fits = c.outstanding <= inHand;
+    sel.value = fits ? "float" : "payout";
+    const say = () => {
+      hint.textContent = sel.value === "float"
+        ? `No money moves. ${esc(float0.name || float0.email)} is carrying `
+          + `${fmt(inHand, float0.currency || ccy)}; this draws it down to `
+          + `${fmt(inHand - c.outstanding, float0.currency || ccy)}.`
+        : `Paid to them on top of the float, which stays at `
+          + `${fmt(inHand, float0.currency || ccy)}.`;
+      hint.style.color = sel.value === "float" && c.outstanding > inHand
+        ? "var(--warn)" : "var(--muted)";
+    };
+    sel.addEventListener("change", say);
+    say();
+  }
+
   return td;
 }
 
@@ -8656,6 +8765,7 @@ async function tellClaimant(claim, kind, detail) {
       paid: ((detail.paid ?? 0) / 100).toFixed(2),
       outstanding: ((detail.outstanding ?? 0) / 100).toFixed(2),
       mode: detail.mode || "", reference: detail.ref || "",
+      source: detail.source || "payout",
       paid_on: detail.paidOn || "", note: detail.note || "",
       group: groupLabel(groupOf(claim.sub).id), reason: detail.reason || "",
     });
@@ -9221,6 +9331,231 @@ function renderPeople() {
 /* ---------- billing ---------- */
 
 const usd = (n) => "$" + n.toLocaleString("en-US");
+
+/* ---------- the float ----------
+ *
+ * Housekeeping and the canteen are not bought on anybody's own card. A few
+ * people are handed cash, spend it through the month, and submit the receipts
+ * here like everybody else. This is the other half of that arrangement: how
+ * much of the company's money each of them is holding right now.
+ *
+ * Nothing about settlement changes. A float holder's claim is reimbursed like
+ * anybody's, which is what makes the float revolve: hand over 20,000, a 5,000
+ * canteen bill is spent and claimed, the 5,000 reimbursement puts it back to
+ * 20,000. The balance falls only while spending runs ahead of reimbursement,
+ * and a rejected claim leaves it permanently short - which is exactly the
+ * accountability this exists for.
+ *
+ *     held now = advanced - returned + reimbursed - spent
+ *
+ * Printed on the page in those words, because a balance somebody cannot
+ * reconstruct is a balance they will not act on.
+ */
+let ADVANCES = { currency: "", holders: [], movements: [] };
+let advFormOpen = false;
+
+async function loadAdvances() {
+  if (!can.seeQueue()) return;
+  const { ok, data } = await authCall("/advances", {});
+  if (ok) ADVANCES = {
+    currency: data.currency || orgCurrency(),
+    holders: data.holders || [],
+    movements: data.movements || [],
+  };
+}
+
+/** Decimal strings from the server, in the minor units this page works in. */
+const advMinor = (v) => Math.round(parseFloat(v || "0") * 100) || 0;
+
+function renderAdvances() {
+  const ccy = ADVANCES.currency || orgCurrency();
+  const holders = ADVANCES.holders || [];
+  const rw = can.seeQueue();
+
+  const sum = (f) => holders.reduce((t, h) => t + f(h), 0);
+  const out = sum(h => advMinor(h.held));
+  const advanced = sum(h => advMinor(h.advanced) - advMinor(h.returned));
+  const flight = sum(h => advMinor(h.pending));
+
+  $("adv-count").textContent = holders.length || "0";
+  $("adv-held").textContent = holders.length ? fmt(out, ccy) : "—";
+  $("adv-held-note").textContent = holders.length
+    ? "Handed over and not yet accounted for by a settled claim."
+    : "Nobody holds a float yet.";
+  $("adv-paid").textContent = holders.length ? fmt(advanced, ccy) : "—";
+  $("adv-gap").textContent = holders.length ? fmt(flight, ccy) : "—";
+
+  $("adv-banner").innerHTML = rw
+    ? `<strong>Recording as ${currentUser.name}.</strong><span>Logging an advance `
+      + `records the cash handed over; it does not move money on its own. A `
+      + `claim settled <em>from the float</em> draws it down and moves no `
+      + `money; one settled as a separate payout reimburses them and leaves `
+      + `the float alone. Still out = advanced \u2212 returned \u2212 settled `
+      + `from it.</span>`
+    : `<strong>Read-only.</strong><span>The float is a Finance Executive's to record.</span>`;
+
+  const actions = $("adv-actions");
+  if (actions) actions.style.display = rw ? "" : "none";
+
+  $("adv-sub").textContent = holders.length
+    ? `${holders.length} ${holders.length === 1 ? "person holds" : "people hold"} cash \u00b7 ${ccy}`
+    : "nobody holds cash";
+
+  const tb = $("adv-list"); tb.textContent = "";
+  if (!holders.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="7" class="empty">Nobody holds a float. '
+      + 'Record an advance below and they appear here.</td>';
+    tb.appendChild(tr);
+  }
+  holders.forEach(h => {
+    const hccy = h.currency || ccy;
+    const stillOut = advMinor(h.held);
+    const inHand = advMinor(h.in_hand);
+    const tr = document.createElement("tr");
+    /* Red for a real overdraw, amber for one that may not be.
+     *
+     * `in hand` subtracts every unsettled claim, and at that moment nobody
+     * has yet said which of them will come off the float - a 50,000 laptop
+     * somebody paid for personally will be a separate payout, and counting it
+     * against a 20,000 float shows them 30,000 overdrawn for something that
+     * is not the float's business at all.
+     *
+     * So the alarm is `still out`: that figure only moves when a claim has
+     * actually been settled against the advance, and negative there means
+     * they really have spent more of the company's money than they were
+     * given. A negative `in hand` is worth a second look, not a red flag,
+     * and it resolves itself the moment finance chooses. */
+    const tone = stillOut < 0 ? "var(--bad)"
+               : inHand < 0 ? "var(--warn)"
+               : inHand === 0 ? "var(--muted)" : "var(--ok)";
+    tr.innerHTML =
+      `<td><div class="pname">${esc(h.name || h.email)}</div>` +
+        `<div class="pmeta">${esc(h.email)}</div></td>` +
+      `<td class="n">${fmt(advMinor(h.advanced) - advMinor(h.returned), hccy)}</td>` +
+      `<td class="n">${fmt(advMinor(h.from_float), hccy)}</td>` +
+      `<td class="n">${fmt(stillOut, hccy)}</td>` +
+      `<td class="n" style="color:${advMinor(h.pending) ? "var(--warn)" : "inherit"}">` +
+        `${advMinor(h.pending) ? fmt(advMinor(h.pending), hccy) : "\u2014"}</td>` +
+      `<td class="n" style="color:${tone};font-weight:600">${fmt(inHand, hccy)}</td>` +
+      `<td class="day">${h.last_at ? esc(agoOf(h.last_at * 1000)) : "\u2014"}</td>`;
+    tb.appendChild(tr);
+  });
+
+  const log = $("adv-log"); log.textContent = "";
+  const moves = ADVANCES.movements || [];
+  $("adv-log-sub").textContent = moves.length
+    ? `${moves.length} recorded` : "nothing recorded yet";
+  if (!moves.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="empty">No advance has been recorded.</td>';
+    log.appendChild(tr);
+  }
+  moves.forEach(m => {
+    const tr = document.createElement("tr");
+    const back = m.kind === "return";
+    tr.innerHTML =
+      `<td class="day">${esc(dayStamp(m.at * 1000))}</td>` +
+      `<td>${esc(m.holder_name || m.holder)}</td>` +
+      `<td><span class="state ${back ? "off" : "on"}">` +
+        `${back ? "handed back" : "advance"}</span>` +
+        (m.mode ? `<span class="gid" style="margin-left:7px">${esc(m.mode)}</span>` : "") +
+        (m.reference ? `<span class="refno inline">${esc(m.reference)}</span>` : "") +
+      `</td>` +
+      `<td class="n" style="color:${back ? "var(--muted)" : "var(--ok)"}">` +
+        `${back ? "\u2212" : "+"}${fmt(advMinor(m.amount), m.currency || ccy)}</td>` +
+      `<td>${esc(m.by)}</td>` +
+      `<td class="reason">${esc(m.note || "\u2014")}</td>`;
+    log.appendChild(tr);
+  });
+
+  paintAdvanceForm();
+}
+
+/** Record cash handed over, or handed back. */
+function paintAdvanceForm() {
+  const box = $("adv-form");
+  if (!box) return;
+  box.hidden = !advFormOpen;
+  const go = $("adv-new");
+  if (go) go.textContent = advFormOpen ? "Cancel" : "+ Record an advance";
+  if (!advFormOpen) { box.textContent = ""; return; }
+
+  const ccy = ADVANCES.currency || orgCurrency();
+  // Everybody who can still be handed cash. A removed person cannot, and the
+  // server refuses it too - the list is the courtesy, the server is the rule.
+  const people = PEOPLE.filter(p => p.status !== "removed");
+  box.innerHTML = `
+    <div class="settle">
+      <div class="settle-grid">
+        <div class="sf"><label for="adv-who">Holder</label>
+          <select id="adv-who">${people.map(p =>
+            `<option value="${esc(p.email)}">${esc(p.name || p.email)}</option>`).join("")}</select></div>
+        <div class="sf"><label for="adv-kind">What happened</label>
+          <select id="adv-kind">
+            <option value="advance">Cash advanced to them</option>
+            <option value="return">Cash handed back</option>
+          </select></div>
+        <div class="sf"><label for="adv-amt">Amount</label>
+          <input type="number" id="adv-amt" min="0.01" step="0.01" placeholder="0.00">
+          <span class="sf-hint">In ${esc(ccy)}.</span></div>
+        <div class="sf"><label for="adv-mode">Mode</label>
+          <select id="adv-mode">${PAY_MODES.map(m =>
+            `<option value="${m}">${m}</option>`).join("")}</select></div>
+        <div class="sf"><label for="adv-ref">Reference</label>
+          <input type="text" id="adv-ref" placeholder="optional"></div>
+        <div class="sf"><label for="adv-note">Note</label>
+          <input type="text" id="adv-note" placeholder="optional"></div>
+      </div>
+      <div class="formrow">
+        <button class="btn primary" type="button" id="adv-go">Record it</button>
+      </div>
+    </div>`;
+  const cash = $("adv-mode");
+  if (cash) cash.value = "cash";
+  $("adv-go").addEventListener("click", recordAdvance);
+}
+
+async function recordAdvance() {
+  const btn = $("adv-go"), msg = $("adv-msg");
+  const show = (text, good) => {
+    msg.hidden = false;
+    msg.className = "msg " + (good ? "ok" : "err");
+    msg.textContent = text;
+  };
+  const holder = $("adv-who").value;
+  const kind = $("adv-kind").value;
+  const amount = parseFloat($("adv-amt").value || "0");
+  if (!holder) return show("Say who the advance is for.", false);
+  if (!(amount > 0)) return show("Enter the amount handed over.", false);
+
+  const who = (PEOPLE.find(p => p.email === holder) || {}).name || holder;
+  const ccy = ADVANCES.currency || orgCurrency();
+  // Confirmed, because it is the record of cash leaving the company and there
+  // is no undo: a mistake is corrected by recording the opposite movement,
+  // which leaves both on the ledger for ever.
+  if (!confirm(`${kind === "return" ? "Record " + who + " handing back "
+                                    : "Record " + fmt(Math.round(amount * 100), ccy) + " advanced to " + who}`
+      + `${kind === "return" ? fmt(Math.round(amount * 100), ccy) : ""}?\n\n`
+      + "This is the record of cash changing hands. It cannot be edited - a "
+      + "correction is another movement, and both stay on the ledger.")) return;
+
+  btn.disabled = true; btn.textContent = "Recording\u2026";
+  const { ok, data } = await authCall("/advances/record", {
+    holder, kind, amount: amount.toFixed(2), currency: ccy,
+    mode: $("adv-mode").value, reference: $("adv-ref").value.trim(),
+    note: $("adv-note").value.trim(),
+  });
+  btn.disabled = false; btn.textContent = "Record it";
+  if (!ok) return show(data.error || "Could not record it.", false);
+
+  advFormOpen = false;
+  await loadAdvances();
+  renderAll();
+  show(kind === "return"
+    ? `Recorded: ${who} handed back ${fmt(Math.round(amount * 100), ccy)}.`
+    : `Recorded: ${fmt(Math.round(amount * 100), ccy)} advanced to ${who}.`, true);
+}
 
 function renderBilling() {
   const rw = can.buyCredits();
@@ -10027,6 +10362,7 @@ function renderAll() {
   else if (view === "org") renderOrg();
   else if (view === "people") renderPeople();
   else if (view === "budgets") renderBudgets();
+  else if (view === "advances") renderAdvances();
   else if (view === "billing") renderBilling();
   else if (view === "channels") renderChannels();
   else if (view === "claim") { hostDetail("claim"); renderClaimPage(); }
@@ -10330,6 +10666,11 @@ async function discardRules(msgId) {
   paintRulesState();
 }
 
+$("adv-new").addEventListener("click", () => {
+  advFormOpen = !advFormOpen;
+  const msg = $("adv-msg"); if (msg) msg.hidden = true;
+  paintAdvanceForm();
+});
 $("rules-save").addEventListener("click", () => saveRules("rules-save", "rules-msg"));
 $("rules-discard").addEventListener("click", () => discardRules("rules-msg"));
 $("stale-reload").addEventListener("click", () => location.reload());
