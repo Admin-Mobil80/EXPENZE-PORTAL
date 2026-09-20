@@ -19,6 +19,13 @@
   --bad:#9E2F27; --bad-bg:#F6E4E2;
   --review:#4A5768; --review-bg:#E6E9EE;
   --focus:#17191C; --radius:3px;
+  /* Cost-centre chips. See `.state.g0`. */
+  --g0:#1F5D8C; --g0-bg:#E2EDF5;
+  --g1:#7A3E86; --g1-bg:#F0E6F3;
+  --g2:#0F6B60; --g2-bg:#DFF0ED;
+  --g3:#96530F; --g3-bg:#F7EBDC;
+  --g4:#8C2F4A; --g4-bg:#F6E4EA;
+  --g5:#445A17; --g5-bg:#EAF0DE;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -30,6 +37,12 @@
     --bad:#E08A82; --bad-bg:#351B18;
     --review:#A2AFC2; --review-bg:#1E242C;
     --focus:#ECEEE8;
+    --g0:#8FBEDD; --g0-bg:#152936;
+    --g1:#CBA3D4; --g1-bg:#2C1F31;
+    --g2:#71C4B8; --g2-bg:#102B28;
+    --g3:#DBA65C; --g3-bg:#33260F;
+    --g4:#D98FA5; --g4-bg:#331B23;
+    --g5:#A8C273; --g5-bg:#232C13;
   }
 }
 :root[data-theme="dark"] {
@@ -41,6 +54,12 @@
   --bad:#E08A82; --bad-bg:#351B18;
   --review:#A2AFC2; --review-bg:#1E242C;
   --focus:#ECEEE8;
+  --g0:#8FBEDD; --g0-bg:#152936;
+  --g1:#CBA3D4; --g1-bg:#2C1F31;
+  --g2:#71C4B8; --g2-bg:#102B28;
+  --g3:#DBA65C; --g3-bg:#33260F;
+  --g4:#D98FA5; --g4-bg:#331B23;
+  --g5:#A8C273; --g5-bg:#232C13;
 }
 /* Views differ in height, so some need a scrollbar and some do not. Without a
    reserved gutter the page width changes by the scrollbar's width every time
@@ -979,6 +998,20 @@ td .ident { font-family:"IBM Plex Mono",monospace; font-size:.75rem; }
 .state.on { background:var(--ok-bg); color:var(--ok); }
 .state.wait { background:var(--warn-bg); color:var(--warn); }
 .state.off { background:var(--surface-2); color:var(--muted); border:1px solid var(--rule); }
+/* A colour per cost centre.
+   Every group chip was the same green, so a column of them was a column of
+   identically-shaped words that had to be read one at a time - on the screen
+   where somebody is scanning for which budget a payment comes out of. Six
+   tints, assigned by a hash of the group's id, so a group keeps its colour
+   across every screen and across reloads without anything being stored.
+   Chosen to stay apart at chip size and to carry their own text colour, since
+   a tint that reads on paper does not read on ink. */
+.state.g0 { background:var(--g0-bg); color:var(--g0); }
+.state.g1 { background:var(--g1-bg); color:var(--g1); }
+.state.g2 { background:var(--g2-bg); color:var(--g2); }
+.state.g3 { background:var(--g3-bg); color:var(--g3); }
+.state.g4 { background:var(--g4-bg); color:var(--g4); }
+.state.g5 { background:var(--g5-bg); color:var(--g5); }
 .state + .num { font-family:"IBM Plex Mono",monospace; font-size:.72rem; color:var(--muted); margin-left:6px; }
 tr.uninvited td:first-child, tr.uninvited td:nth-child(2), tr.uninvited td:nth-child(3) { opacity:.7; }
 /* A removed person used to be dimmed to 45% and have "· REMOVED" stamped after
@@ -1780,13 +1813,15 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
           <th scope="col">Receipt date</th>
           <th scope="col">Submitter</th><th scope="col">Vendor</th><th scope="col">Cleared by</th>
           <th scope="col">Group</th>
-          <th scope="col" style="text-align:right">Approved</th>
-          <!-- Only once something on this list has actually been part paid.
-               Every claim here is awaiting reimbursement, so on a normal day
-               the column is a row of dashes taking width from the figures
-               beside it that do mean something. -->
+          <!-- Approved and Outstanding were two columns printing one figure.
+               Every claim on this list is awaiting reimbursement in full -
+               nothing has been paid against it - so they differed only on a
+               claim somebody had part paid, which is not something this
+               product tracks. One column, "Owed", and the pair comes back
+               only when a part payment makes them two different numbers. -->
+          <th scope="col" style="text-align:right" id="pay-approved-head" hidden>Approved</th>
           <th scope="col" style="text-align:right" id="pay-paid-head" hidden>Paid</th>
-          <th scope="col" style="text-align:right">Outstanding</th>
+          <th scope="col" style="text-align:right" id="pay-owed-head">Owed</th>
         </tr></thead><tbody id="paylist"></tbody></table>
       </div>
     </section>
@@ -7849,8 +7884,15 @@ function renderPayments() {
   // because a claim that has had money against it and still shows an
   // outstanding balance is exactly the row a finance executive must see.
   const anyPartPaid = part.length > 0;
+  // Approved and Paid appear together or not at all: without a part payment
+  // Approved is Owed, and two headings over one figure is the thing being
+  // removed rather than half of it.
   const paidHead = $("pay-paid-head");
   if (paidHead) paidHead.hidden = !anyPartPaid;
+  const approvedHead = $("pay-approved-head");
+  if (approvedHead) approvedHead.hidden = !anyPartPaid;
+  const owedHead = $("pay-owed-head");
+  if (owedHead) owedHead.textContent = anyPartPaid ? "Outstanding" : "Owed";
 
   /* One figure, because payouts are made in one currency.
      This used to sum per claim currency and print them side by side - honest
@@ -7883,7 +7925,7 @@ function renderPayments() {
     // The width follows the header, which is one narrower with nothing part
     // paid - an empty row that spans the wrong number sits under the wrong
     // columns.
-    tr.innerHTML = `<td colspan="${anyPartPaid ? 9 : 8}" class="empty">`
+    tr.innerHTML = `<td colspan="${anyPartPaid ? 9 : 7}" class="empty">`
       + "Nothing awaiting reimbursement. Cleared claims land here until they are paid.</td>";
     tb.appendChild(tr);
   }
@@ -7931,8 +7973,11 @@ function renderPayments() {
       `</td>` +
       `<td>${badge}</td>` +
       `<td>${groupChip(c.sub)}</td>` +
-      `<td class="amt">${fmt(c.approved, ccy)}</td>` +
-      (anyPartPaid ? `<td class="amt">${c.paid ? fmt(c.paid, ccy) : "—"}</td>` : "") +
+      // One figure, unless a part payment has made them genuinely two.
+      (anyPartPaid
+        ? `<td class="amt">${fmt(c.approved, ccy)}</td>`
+          + `<td class="amt">${c.paid ? fmt(c.paid, ccy) : "—"}</td>`
+        : "") +
       `<td class="out ${c.outstanding === 0 ? "clear" : ""}">${fmt(c.outstanding, ccy)}</td>`;
     tb.appendChild(tr);
 
@@ -8273,9 +8318,33 @@ async function renderClaimHistory(submissionId, into) {
   });
 }
 
+/* A colour for a cost centre, distinct from its neighbours.
+ *
+ * Taken from the group's position in the organisation's own list, so the
+ * first six are guaranteed six different tints. A hash of the id was the
+ * first attempt and it is the obvious thing to reach for - but six buckets
+ * over arbitrary strings collide constantly, and this account's own groups
+ * proved it immediately: `mobil80` and `cocobble` both landed on the same
+ * shade, which is worse than no colour at all on a screen whose whole purpose
+ * is telling them apart.
+ *
+ * Position is stable in the way that matters here. Adding a group appends, so
+ * every existing chip keeps its colour; only reordering the list would move
+ * them, and nothing in the product reorders it. A group no longer on the list
+ * - a claim from before it was deleted - falls back to the hash, which is
+ * fine: it has nothing left to be confused with.
+ */
+function groupTint(id) {
+  const at = (ORG_PROFILE.groups || []).findIndex(g => g.id === id);
+  if (at >= 0) return "g" + (at % 6);
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return "g" + (h % 6);
+}
+
 function groupChip(sub) {
   const g = groupOf(sub);
-  if (g.id) return `<span class="state on">${groupLabel(g.id)}</span>`;
+  if (g.id) return `<span class="state ${groupTint(g.id)}">${groupLabel(g.id)}</span>`;
   // No "awaiting their reply". Nobody is asked which group a receipt belongs
   // to any more - the agent reads it off the bill where the bill says, and
   // otherwise a reviewer sets it here.
