@@ -274,6 +274,18 @@ td.why.dupe { color:var(--bad); font-weight:600; }
    the height above the fold. */
 .verdict .total { font-family:"IBM Plex Mono",monospace; font-variant-numeric:tabular-nums;
   font-size:1rem; font-weight:600; letter-spacing:-.01em; margin-left:2px; }
+/* The line that identifies the claim, at the weight of the thing it is.
+   Reference, submitter and vendor were one muted monospace sentence set at
+   .67rem, the same as the cap note and the route line beside it - three facts
+   somebody reads on every claim, drawn as the quietest text on the screen. */
+#detail-who { display:inline-flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+  padding:5px 11px; border:1px solid var(--rule-firm); border-radius:var(--radius);
+  background:var(--surface-2); color:var(--ink); white-space:normal; }
+#detail-who .wref { font-family:"IBM Plex Mono",monospace; font-size:.72rem;
+  font-weight:600; letter-spacing:.02em; color:var(--ink); }
+#detail-who .wwho { font-size:.82rem; font-weight:600; color:var(--ink); }
+#detail-who .wvendor { font-size:.82rem; color:var(--ink-2); }
+#detail-who .wdot { color:var(--rule-firm); font-size:.7rem; }
 .verdict .cap, .verdict .payout { font-family:"IBM Plex Mono",monospace;
   font-size:.68rem; color:var(--muted); }
 .verdict .payout { color:var(--ok); }
@@ -2312,6 +2324,23 @@ function evaluatePolicy(currency, lineItems, expenseType, statedTotal) {
   // The printed total wins over our own reading of the lines.
   const printed = statedMinor(statedTotal);
   if (printed !== null) receiptTotal = printed;
+
+  /* Nothing was read off the bill at all. Mirrors policy.py.
+   *
+   * A blurred photograph of a handwritten bill came back with no lines and no
+   * printed total, and an empty list sums to zero - so the claim presented as
+   * a receipt for ₹0.00 whose only complaint was that it had no expense type.
+   * That sent a reviewer to the type dropdown when the real problem was that
+   * there were no figures on the claim to type anything about.
+   *
+   * First in the list, because every other finding about a claim with no
+   * figures is noise on top of this one. */
+  if (receiptTotal === 0 && !decided.length && printed === null) {
+    violations.unshift({ code:"nothing_read", blocking:true, amount:null,
+      msg:"Nothing could be read off this receipt — no line items and no "
+        + "printed total. The photograph is likely too blurred, too dark or "
+        + "cropped. Somebody has to read the bill itself and decide." });
+  }
 
   const cap = capFor(rule, currency);
   if (Object.keys(rule.caps || {}).length && cap === null) {
@@ -4672,8 +4701,33 @@ function renderDetail() {
    * `sentBackNow` outlived it, because the line under the heading still names
    * who took the claim back out of the payment run. */
   const sentBackNow = sub.pulledBack && !decision && !stage;
-  $("detail-who").textContent = (sub.reference ? sub.reference + " · " : "")
-    + `${sub.who} · ${sub.vendor}`;
+  /* Who, from where, under which reference - as three facts rather than one
+   * run of grey monospace.
+   *
+   * It was `Exp-26 · Jayakumar · Techno Service Zone` in one muted chip, at
+   * the same weight as the route line and the cap note beside it. It is the
+   * most-read line on the page: the reference is what somebody quotes in an
+   * email, the submitter is who gets paid, and the vendor is what the bill
+   * is. Reading it meant picking three things out of a sentence separated by
+   * middots.
+   *
+   * Built as elements so each can be styled for what it is - the reference in
+   * mono because it is an identifier people copy, the vendor as the name of a
+   * thing, the person between them - and so the separators are drawn rather
+   * than typed, which stops them being selected along with the text. */
+  const who = $("detail-who");
+  who.textContent = "";
+  const part = (cls, text) => {
+    const el = document.createElement("span");
+    el.className = cls; el.textContent = text;
+    return el;
+  };
+  const dot = () => part("wdot", "\u00b7");
+  const bits = [];
+  if (sub.reference) bits.push(part("wref", sub.reference));
+  if (sub.who) bits.push(part("wwho", sub.who));
+  if (sub.vendor) bits.push(part("wvendor", sub.vendor));
+  bits.forEach((el, i) => { if (i) who.appendChild(dot()); who.appendChild(el); });
   /* The verdict moves into the tag below, so the sentence here does not
      repeat it: "REJECTED  by Riyad Rasheed · 17:46", not "REJECTED Rejected
      by Riyad Rasheed · 17:46". */
@@ -5286,7 +5340,18 @@ function renderDetail() {
      * one of the enabled types in the policy right now. `not_covered` is not,
      * which is the point of that answer. */
     const typeOk = rules.types.some(t => t.enabled && t.id === w.type);
-    const choices = (!typeOk || unsaved || needsGroup)
+
+    /* And nothing to approve.
+     *
+     * A claim the agent could not read carries no figures at all, so Approve
+     * would release nothing into a payment run and record a decision about an
+     * amount nobody has established. Setting a type on it does not help: the
+     * question is not what kind of expense it is, it is what it cost.
+     *
+     * Reject is the honest button, and the other way out is off this screen
+     * entirely - a clearer photograph, submitted again. */
+    const unreadable = res.violations.some(v => v.code === "nothing_read");
+    const choices = (!typeOk || unsaved || needsGroup || unreadable)
       ? [["Reject","danger","Rejected"]]
       : [["Approve as reviewed","primary","Approved"],
          ["Reject","danger","Rejected"]];
@@ -5344,6 +5409,11 @@ function renderDetail() {
     s.textContent = unsaved
       ? (pending ? `${pending} — not saved yet. ` : "Unsaved change. ")
         + "Save it before approving."
+      : unreadable
+      // Named before the expense type, because on a claim with no figures the
+      // type is not the thing standing in the way.
+      ? "Nothing was read off this receipt, so there is no amount to approve. "
+        + "Reject it and ask for a clearer photograph of the same bill."
       : !typeOk
       // Said as the requirement it is, rather than as a finding. Nothing is
       // wrong with the claim; it simply cannot be reported on until somebody
@@ -5357,7 +5427,7 @@ function renderDetail() {
       ? "Set a group above. The payment comes out of a cost centre, so this "
         + "cannot be approved without one — rejecting it needs nothing."
       : `Deciding as ${currentUser.name} · ${currentUser.role}`;
-    if (!typeOk || unsaved || needsGroup) s.style.color = "var(--warn)";
+    if (!typeOk || unsaved || needsGroup || unreadable) s.style.color = "var(--warn)";
     abox.appendChild(s);
     // Not blocked - a sole owner with nobody else to ask would never be paid -
     // but said out loud. The claim records who decided it, and "the same
