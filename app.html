@@ -436,6 +436,12 @@ td.disp .yes { color:var(--ok); } td.disp .no { color:var(--bad); }
   letter-spacing:.07em; color:var(--muted); }
 .blankways .v { font-family:"IBM Plex Mono",monospace; font-size:.82rem; color:var(--ink); }
 .blankways .n { font-size:.75rem; color:var(--muted); line-height:1.5; }
+/* A card in the empty queue that goes somewhere, rather than one that only
+   states a fact. It reads as pressable because it is. */
+.blankways .goes { cursor:pointer; }
+.blankways .goes:hover { background:var(--surface-2); }
+.blankways .goes:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }
+.blankways .goes .v { font-size:1.15rem; font-weight:600; letter-spacing:-.01em; }
 
 .subtabs .tabaside { margin-left:auto; display:flex; align-items:center; gap:7px;
   padding-bottom:5px; font-family:"IBM Plex Mono",monospace; font-size:.62rem;
@@ -1393,10 +1399,21 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
         <span class="note" id="q-oldest-note"></span></div>
     </section>
 
+    <!-- Two different empty queues, and they were the same screen.
+         An organisation that has never received a receipt needs to know how
+         to get one in, which is what the three channels below are for. A
+         reviewer who has just cleared the last claim needs none of that -
+         they know how receipts arrive - and was being handed a WhatsApp
+         number and told to photograph a bill as the reward for finishing
+         their work. The channel panel belongs on My expenses, where somebody
+         is actually about to send something. -->
     <section class="panel blankstate" id="queue-blank" hidden>
-      <h3>Nothing to review yet</h3>
+      <h3 id="queue-blank-head">Nothing to review yet</h3>
       <p id="queue-blank-why"></p>
-      <div class="blankways">
+      <!-- Where the work went, for the reviewer who has just finished it.
+           Each is a place to go rather than a number to admire. -->
+      <div class="blankways" id="queue-blank-next" hidden></div>
+      <div class="blankways" id="queue-blank-ways">
         <div><span class="k">WhatsApp</span><span class="v" id="blank-wa"></span>
              <span class="n">Photograph the receipt and send it. Your number has to be added and verified first.</span></div>
         <div><span class="k">Email</span><span class="v" id="blank-mail"></span>
@@ -4572,11 +4589,69 @@ function renderQueue() {
     if (panel) panel.hidden = true;
     if (blank) {
       blank.hidden = false;
-      $("queue-blank-why").textContent = SUBMISSIONS.length
-        ? "Nothing is waiting for a decision. Anything cleared is in Pending settlement until it is paid."
+      /* Never a receipt, or none left to decide. Different people, different
+       * screens.
+       *
+       * The first is an organisation on its first day: nothing has arrived,
+       * and the three ways to send one in are the whole answer. The second is
+       * a reviewer who has just cleared the queue - they know perfectly well
+       * how receipts arrive, and being shown a WhatsApp number and told to
+       * photograph a bill is a strange thing to be handed for finishing your
+       * work. What they want is where it went. */
+      const everReceived = SUBMISSIONS.length > 0;
+      $("queue-blank-head").textContent = everReceived
+        ? "Nothing left to review" : "Nothing to review yet";
+      $("queue-blank-why").textContent = everReceived
+        ? "Every claim has been decided. Nothing here needs you."
         : "No receipts have been submitted yet. They arrive here when someone sends one.";
+
+      const ways = $("queue-blank-ways");
+      if (ways) ways.hidden = everReceived;
       $("blank-wa").textContent = ORG.whatsapp || "not configured yet";
       $("blank-mail").textContent = ORG.intake || "not configured yet";
+
+      const next = $("queue-blank-next");
+      if (next) {
+        next.hidden = !everReceived;
+        next.textContent = "";
+        if (everReceived) {
+          const owed = payableClaims().filter(c => c.outstanding > 0);
+          const rejected = rejectedClaims().length;
+          const total = owed.reduce((t, c) => t + c.outstanding, 0);
+          // Only what somebody would actually go and do next. A tile reading
+          // "0 rejected" is a fact about nothing.
+          const cards = [
+            ["payments", "Pending settlement",
+             owed.length ? `${owed.length} claim${owed.length === 1 ? "" : "s"}` : "none",
+             owed.length
+               ? `${fmt(total, orgCurrency())} owed to submitters, waiting to be paid.`
+               : "Nothing is waiting to be paid."],
+          ];
+          if (rejected) {
+            cards.push(["queue-rejected", "Rejected", String(rejected),
+                        "Claims refused, with the reason each submitter was given."]);
+          }
+          cards.forEach(([to, label, value, note]) => {
+            const card = document.createElement("div");
+            card.className = "goes";
+            const k = document.createElement("span"); k.className = "k"; k.textContent = label;
+            const v = document.createElement("span"); v.className = "v"; v.textContent = value;
+            const n = document.createElement("span"); n.className = "n"; n.textContent = note;
+            card.append(k, v, n);
+            card.setAttribute("role", "button");
+            card.tabIndex = 0;
+            const go = () => {
+              if (to === "queue-rejected") { queueTab = "rejected"; renderQueue(); }
+              else goTo(to);
+            };
+            card.addEventListener("click", go);
+            card.addEventListener("keydown", e => {
+              if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+            });
+            next.appendChild(card);
+          });
+        }
+      }
     }
     return;
   }
