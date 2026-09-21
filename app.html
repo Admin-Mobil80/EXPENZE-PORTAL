@@ -7504,6 +7504,10 @@ const settlements = {};
 // How the money actually left. Optional - a finance team mid payment-run
 // should not be blocked from recording a settlement because the UTR is not to
 // hand yet - but recorded whenever given.
+/* What a float settlement is "paid" by. Not a transfer - the holder already
+   had the money - so it is named for what happened rather than left saying
+   "bank transfer" on a row where no bank was involved. */
+const FLOAT_MODE = "against float";
 const PAY_MODES = ["bank transfer", "UPI", "cash", "payroll", "card refund", "cheque", "other"];
 
 // Which claim has a form open, and which of the two it is: "pay" or "reject".
@@ -8602,11 +8606,12 @@ function settleForm(c, ccy) {
           </select>
           <span class="sf-hint" id="sf-source-hint"></span></div>
         <div class="sf"><label for="sf-mode">Mode of payment</label>
-          <select id="sf-mode">${PAY_MODES.map(m => `<option value="${m}">${m}</option>`).join("")}</select></div>
+          <select id="sf-mode">${[...PAY_MODES, FLOAT_MODE].map(m =>
+            `<option value="${m}">${m}</option>`).join("")}</select></div>
         <div class="sf"><label for="sf-ref">Reference</label>
           <input type="text" id="sf-ref" placeholder="UTR / cheque no." required>
-          <span class="sf-hint">Required \u2014 it ties this to the bank
-            statement.</span></div>
+          <span class="sf-hint" id="sf-ref-hint">Required \u2014 it ties this
+            to the bank statement.</span></div>
         <div class="sf"><label for="sf-date">Paid on</label>
           <input type="date" id="sf-date" value="${new Date().toISOString().slice(0,10)}"></div>
         <div class="sf"><label for="sf-note">Notes</label>
@@ -8670,10 +8675,23 @@ function settleForm(c, ccy) {
   const goBtn = td.querySelector("#sf-go");
   const nameTheAmount = () => {
     const minor = Math.round(parseFloat(amtBox.value || "0") * 100);
+    /* Only when the control is actually on screen.
+     *
+     * The select is built with "Their float" as its first option and starts
+     * inside a hidden wrapper, so reading its value before the block that
+     * reveals it has run says "float" for somebody who holds no float at all
+     * - and that would have waived the reference requirement for everybody. */
+    const srcWrap0 = td.querySelector("#sf-source-wrap");
+    const src = td.querySelector("#sf-source");
+    const onFloat = !!src && srcWrap0 && !srcWrap0.hidden && src.value === "float";
+    // A float settlement has no transfer behind it, so there is no reference
+    // to demand - and the button says what it is doing rather than "as paid",
+    // which would be the same fiction in one more place.
     const ref = refBox.value.trim();
-    goBtn.disabled = !(minor > 0) || !ref;
+    goBtn.disabled = !(minor > 0) || (!onFloat && !ref);
     goBtn.textContent = !(minor > 0) ? "Enter an amount"
-      : !ref ? "Enter the transaction reference"
+      : (!onFloat && !ref) ? "Enter the transaction reference"
+      : onFloat ? `Set ${fmt(Math.min(minor, c.outstanding), ccy)} against the float`
       : `Record ${fmt(Math.min(minor, c.outstanding), ccy)} as paid`;
   };
   amtBox.addEventListener("input", nameTheAmount);
@@ -8691,7 +8709,11 @@ function settleForm(c, ccy) {
     if (!minor || minor <= 0) { amtEl.focus(); return; }
     // Checked again here, not only on the button. The button is the ordinary
     // way in and disabling it is the courtesy; this is the rule.
-    if (!refBox.value.trim()) { refBox.focus(); return; }
+    const srcWrap1 = td.querySelector("#sf-source-wrap");
+    const srcEl = td.querySelector("#sf-source");
+    const settlingFromFloat = !!srcEl && srcWrap1 && !srcWrap1.hidden
+      && srcEl.value === "float";
+    if (!settlingFromFloat && !refBox.value.trim()) { refBox.focus(); return; }
     // Never pay out more than was approved.
     if (minor > c.outstanding) { amtEl.value = (c.outstanding / 100).toFixed(2); amtEl.focus(); return; }
     pay(c, minor, minor === c.outstanding ? "Settled in full" : "Part settlement", {
@@ -8701,7 +8723,7 @@ function settleForm(c, ccy) {
       paidOn: td.querySelector("#sf-date").value,
       // Absent for everybody who holds no float, and the server reads
       // anything that is not "float" as an ordinary payout.
-      source: (td.querySelector("#sf-source") || {}).value || "payout",
+      source: settlingFromFloat ? "float" : "payout",
     });
   });
 
@@ -8733,22 +8755,70 @@ function settleForm(c, ccy) {
     const fccy = float0.currency || ccy;
     const sel = td.querySelector("#sf-source");
     const hint = td.querySelector("#sf-source-hint");
+    const modeSel = td.querySelector("#sf-mode");
+    const refBox2 = td.querySelector("#sf-ref");
+    const refHint = td.querySelector("#sf-ref-hint");
+    const dateLbl = td.querySelector('label[for="sf-date"]');
+    const foot = td.querySelector(".sf-foot");
     // Defaulted to whichever is true rather than to one of them always: a
     // claim the advance can absorb is the ordinary case, and one beyond it
     // cannot come out of money they were never given.
     const fits = c.outstanding <= stillOut;
     sel.value = fits ? "float" : "payout";
+    /* The rest of the row follows the choice.
+     *
+     * Settling from the float moves no money, so every field that describes a
+     * transfer is describing one that did not happen. "Bank transfer" and a
+     * UTR on a float adjustment are not merely redundant - they send the
+     * holder to their statement looking for a payment nobody made, and they
+     * put a fiction in the record an auditor will read back.
+     *
+     * So the mode says what actually happened and cannot be changed, and the
+     * reference stops being required because there is no line to tie it to.
+     * The date stays: when the spend was accounted for is a real fact and the
+     * one thing on this row a float settlement still needs.
+     */
     const say = () => {
+      const onFloat = sel.value === "float";
       const over = c.outstanding > stillOut;
-      hint.textContent = sel.value === "float"
+      hint.textContent = onFloat
         ? `No money moves. It draws the advance down from `
           + `${fmt(stillOut, fccy)} to ${fmt(stillOut - c.outstanding, fccy)}`
           + (over ? " \u2014 more than was advanced." : ".")
         : `Reimbursed on top of the float, which stays at `
           + `${fmt(stillOut, fccy)}.`;
-      hint.style.color = sel.value === "float" && over ? "var(--warn)" : "var(--muted)";
+      hint.style.color = onFloat && over ? "var(--warn)" : "var(--muted)";
+
+      if (modeSel) {
+        modeSel.value = onFloat ? FLOAT_MODE : (modeSel.dataset.was || PAY_MODES[0]);
+        modeSel.disabled = onFloat;
+      }
+      if (refBox2) {
+        refBox2.placeholder = onFloat ? "not applicable" : "UTR / cheque no.";
+        refBox2.disabled = onFloat;
+        if (onFloat) refBox2.value = "";
+      }
+      if (refHint) {
+        refHint.textContent = onFloat
+          ? "No transfer was made, so there is nothing to reference."
+          : "Required \u2014 it ties this to the bank statement.";
+      }
+      if (dateLbl) dateLbl.textContent = onFloat ? "Accounted on" : "Paid on";
+      if (foot) {
+        foot.textContent = onFloat
+          ? "Setting a claim against the float moves no money \u2014 it records "
+            + "that the advance has been spent down by this much."
+          : "The amount and the transaction reference are required. Recording "
+            + "a payment does not move money \u2014 it records that you did.";
+      }
+      nameTheAmount();
     };
-    sel.addEventListener("change", say);
+    sel.addEventListener("change", () => {
+      // Remember what they had picked, so switching back does not lose it.
+      if (sel.value !== "float" && modeSel) modeSel.dataset.was = modeSel.value;
+      say();
+    });
+    if (modeSel) modeSel.dataset.was = modeSel.value;
     say();
   }
 
