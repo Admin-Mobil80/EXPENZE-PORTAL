@@ -4,26 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in — Expenze</title>
-<!-- Real icons, because the tab strip is how anybody finds this again.
-     Safari was drawing a generated letter on a white field, so the console,
-     the site and the BMS were three identical pale tabs in a row of twenty.
-     A solid field of colour is what the eye picks out at that size; the mark
-     only says which of ours it is. -->
-<!-- No cache-busting query on these.
-     Chrome and Safari both probe the bare path - the network log shows
-     /favicon.svg fetched with no query at all - so ?v= gave every icon two
-     identities: the one the page declares and the one the browser asks for.
-     A browser holding a bad answer for the bare path (from the window when
-     these were served as text/html, before the deploy stamped them properly)
-     never reconciles it with the declared one, which is why the home page
-     came good and the console, opened far more often, did not. One URL each,
-     revalidated on every load by the bucket's no-cache header. -->
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<!-- Chrome reaches for these for a bookmark, a new-tab tile and a
-     hi-DPI tab, and had only a 32px tile to scale up. -->
-<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
-<link rel="icon" href="/icon-512.png" sizes="512x512" type="image/png">
+<!-- One icon link, not five.
+
+     ReconFlow sits two tabs away in the same Safari window and draws its mark
+     perfectly from exactly one line: a single SVG icon link and nothing else.
+     Expenze declared five - an SVG, an any-sized .ico, a 192, a 512 and an
+     apple-touch-icon - and drew Safari's generated letter instead.
+
+     Chrome picks the best match from a list; Safari picks, and what it picked
+     here it would not draw. The home page appeared to work because its record
+     was made before the list grew; the console, whose record was remade after,
+     did not. That is the whole difference, and it is why nothing about caches,
+     content types, cache-busting queries or the unclosed head moved it -
+     each of those was a real fault, and none of them was this one.
+
+     /favicon.ico stays on the bucket and every browser probes it at the root
+     without being told to, so removing the link does not lose the fallback.
+     apple-touch-icon is a different rel and never competes for the tab. -->
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#1E7047">
 <link rel="preconnect" href="https://fonts.googleapis.com">
