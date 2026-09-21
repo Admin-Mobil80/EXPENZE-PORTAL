@@ -10,13 +10,22 @@
      the site and the BMS were three identical pale tabs in a row of twenty.
      A solid field of colour is what the eye picks out at that size; the mark
      only says which of ours it is. -->
-<link rel="icon" href="/favicon.svg?v=3" type="image/svg+xml">
-<link rel="icon" href="/favicon.ico?v=3" sizes="any">
+<!-- No cache-busting query on these.
+     Chrome and Safari both probe the bare path - the network log shows
+     /favicon.svg fetched with no query at all - so ?v= gave every icon two
+     identities: the one the page declares and the one the browser asks for.
+     A browser holding a bad answer for the bare path (from the window when
+     these were served as text/html, before the deploy stamped them properly)
+     never reconciles it with the declared one, which is why the home page
+     came good and the console, opened far more often, did not. One URL each,
+     revalidated on every load by the bucket's no-cache header. -->
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="any">
 <!-- Chrome reaches for these for a bookmark, a new-tab tile and a
      hi-DPI tab, and had only a 32px tile to scale up. -->
-<link rel="icon" href="/icon-192.png?v=3" sizes="192x192" type="image/png">
-<link rel="icon" href="/icon-512.png?v=3" sizes="512x512" type="image/png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=3">
+<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+<link rel="icon" href="/icon-512.png" sizes="512x512" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#1E7047">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -623,14 +632,23 @@ tr.listtotal td { border-top:2px solid var(--rule-firm); font-weight:600;
   background:var(--surface-2); }
 tr.listtotal td:first-child { font-family:"IBM Plex Mono",monospace;
   font-size:.7rem; font-weight:400; color:var(--muted); }
-/* What the bill says, over what it comes to here. The converted line is the
-   one the total adds up, so it is the one set in the reader's own currency
-   and the billed figure above it is the quieter of the two. */
-td.amt .billed, td.out .billed, td.n .billed { display:block; }
-td.amt .inhome, td.n .inhome { display:block; font-size:.72rem; color:var(--muted); }
-td.amt .inhome.norate, td.n .inhome.norate { color:var(--warn); }
-td.out .billed.as { display:block; font-size:.72rem; color:var(--muted);
-  font-weight:400; }
+/* What a claim comes to here, over what the bill itself said.
+   The converted figure is on top and at full size, and the original is the
+   quieter line under it - the other way round from how this started. A column
+   of money is read by running an eye down it, and it was running down one
+   where the large figure was rupees on some rows and dollars on others, so
+   the same currency was set in two different sizes and the foot of the column
+   totalled the small print. The top line is now the line the total adds up,
+   on every row and in every such column; the original stays as the evidence
+   for it, since restating somebody's receipt is not ours to do.
+
+   Named for the part each plays rather than for which currency it holds: the
+   settlement column had reached the same arrangement under its own names, and
+   two vocabularies for one idea is how they drift apart again. */
+td.amt .amtmain, td.out .amtmain, td.n .amtmain { display:block; }
+td.amt .amtsub, td.out .amtsub, td.n .amtsub { display:block; font-size:.72rem;
+  color:var(--muted); font-weight:400; }
+td.amt .amtsub.norate, td.n .amtsub.norate { color:var(--warn); }
 
 /* An assumption that moves a verdict is stated on the page, not buried in a
    log. Warm rather than red: it is a normal reading of a normal bill. */
@@ -1188,6 +1206,20 @@ tr.opens:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
 .stamp.done { color:var(--ok); }
 .stage-by { font-family:"IBM Plex Mono",monospace; font-size:.65rem; color:var(--muted);
   margin-left:6px; white-space:nowrap; }
+/* Everything that identifies a row, on one line beneath the thing it
+   identifies.
+
+   The receipt link, the document count and the claim number were three
+   separate blocks in the vendor cell, so every row of My expenses ran to
+   three lines before the status column had said anything - and on a list
+   whose whole job is "where is my money", height spent on a reference number
+   is height not spent showing the next claim.
+
+   Reused by the status cell for the same reason: badge on one line, who
+   decided it on the next, and the row still closes at two. */
+.rowmeta { display:block; margin-top:2px; font-family:"IBM Plex Mono",monospace;
+  font-size:.64rem; color:var(--muted); letter-spacing:.04em; line-height:1.5; }
+.rowmeta a.rlink { font-size:inherit; letter-spacing:inherit; }
 .wapanel { padding:13px 14px; border-bottom:1px solid var(--rule); display:flex;
   gap:12px; align-items:flex-end; flex-wrap:wrap; }
 .wapanel .f { display:flex; flex-direction:column; gap:4px; }
@@ -4967,9 +4999,15 @@ function renderQueue() {
  * total underneath looking like arithmetic that does not work: thirteen rows
  * of mixed dollars and rupees over one rupee figure.
  *
- * So both. What the bill says, and beneath it what that comes to here, at the
- * rate stamped on the claim when it was read. The second line is the one the
- * total adds up, and now it is on the page to be added up.
+ * So both: what that comes to here, at the rate stamped on the claim when it
+ * was read, and beneath it what the bill actually said.
+ *
+ * That order, and not the other way about, which is how this first shipped.
+ * The converted figure is the one the total adds up and the one an eye runs
+ * down the column looking for, so it is the one set at full size. With it
+ * underneath, the same currency was large on a rupee row and small on a
+ * dollar row, and the foot of the column summed the small print. The original
+ * is evidence for the figure above it, which is a second line's job.
  *
  * A claim already in the organisation's own currency gets one line - a second
  * saying the identical thing is noise on every row of a rupee-only account.
@@ -4980,12 +5018,14 @@ function claimedCell(sub, res) {
   const billed = esc(fmt(res.receiptTotal, res.currency));
   if (!ccy || ccy === home) return billed;
   const rate = sub.payoutValue && parseFloat(sub.payoutValue.rate);
-  return `<span class="billed">${billed}</span>`
-    + (rate
-       ? `<span class="inhome">${esc(fmt(Math.round(res.receiptTotal * rate), home))}</span>`
-       // Named rather than converted at a guess, and it is why the total
-       // says "counted as nil" for it.
-       : `<span class="inhome norate">no rate</span>`);
+  // No rate, so there is no rupee figure to lead with and the bill's own
+  // number is the only one there is. The line under it says why - named
+  // rather than converted at a guess, and it is why the total at the foot
+  // says "counted as nil" for this row.
+  if (!rate) return `<span class="amtmain">${billed}</span>`
+    + `<span class="amtsub norate">no rate</span>`;
+  return `<span class="amtmain">${esc(fmt(Math.round(res.receiptTotal * rate), home))}</span>`
+    + `<span class="amtsub">${billed}</span>`;
 }
 
 function totalRow(box, subs, columns) {
@@ -6676,6 +6716,14 @@ const STAGE_LABEL = {
  * more - which is the only distinction My expenses needs to draw, because the
  * question that tab answers is "is my money still coming?". The particular
  * ending is on the row itself. */
+/* The same stages, named for the person who sent the receipt.
+ *
+ * "Approved" is the reviewer's word for what they just did. To the person
+ * waiting for the money it describes a step, not a state: the claim has
+ * cleared review and is now queued for payment, and saying only "approved"
+ * on a row where the Settled column is a dash reads as finished. */
+const MINE_STAGE_LABEL = { ...STAGE_LABEL, approved: "Pending settlement" };
+
 const CLOSED_STAGES = ["settled", "rejected", "withdrawn"];
 const isClosed = (sub) => CLOSED_STAGES.includes(claimStage(sub).stage);
 
@@ -8427,7 +8475,7 @@ function renderPayments() {
       // is reconciled against a bill written in another.
       `<td class="out ${c.outstanding === 0 ? "clear" : ""}">`
         + `${fmt(c.outstanding, ccy)}`
-        + (c.rate ? `<span class="billed as">${esc(fmt(c.original, c.from))}</span>` : "")
+        + (c.rate ? `<span class="amtsub">${esc(fmt(c.original, c.from))}</span>` : "")
       + `</td>`;
     tb.appendChild(tr);
 
@@ -10429,26 +10477,46 @@ function renderMine() {
     const st = claimStage(sub);
     const paid = paidFor(sub.id);
 
+    /* Where the claim stands, and who put it there. Both, in words.
+     *
+     * The cell was a badge reading APPROVED with a name beside it, which
+     * leaves the reader's two questions open: approved by a person or by the
+     * agent, and approved and then what. On a row whose Settled column is a
+     * dash, "APPROVED · Expenze agent" reads as finished business.
+     *
+     * So the badge names where the claim is - pending settlement, because the
+     * money has not moved - and the line under it says the decision was a
+     * review and names whoever made it. The marker stays: a hollow ring for
+     * the agent, a filled one for a person, which is the difference a
+     * submitter most wants to see at a glance.
+     */
     const dupe = sub.duplicateOf
       ? `<span class="stage s-dupe">Possible duplicate</span>` : "";
-    // No "Needs your reply" any more: nothing is ever asked of a submitter, so
-    // a claim in review is with Finance and that is the whole of it.
+    const verb = st.stage === "rejected" ? "Reviewed &amp; rejected by"
+               : st.stage === "withdrawn" ? "Withdrawn by"
+               : "Reviewed &amp; approved by";
+    // Nobody is named on a claim still in review, because nobody has decided
+    // it yet. "With Finance" is the honest answer to "who has this".
+    const said = st.stage === "in_review" ? "With Finance"
+      : st.by ? `${st.kind === "agent" ? "&#9673;" : "&#9679;"} ${verb} ${esc(personName(st.by))}`
+      : "";
     const chip = dupe +
-      `<span class="stage s-${st.stage}">${STAGE_LABEL[st.stage]}</span>` +
-      (st.by ? `<span class="stage-by">${st.kind === "agent" ? "&#9673;" : "&#9679;"} ${esc(personName(st.by))}</span>` : "") +
-      (st.stage === "in_review" ? `<span class="stage-by">With Finance</span>` : "");
+      `<span class="stage s-${st.stage}">${MINE_STAGE_LABEL[st.stage]}</span>` +
+      (said ? `<span class="rowmeta">${said}</span>` : "");
 
     // Only offered where there is actually a file to open.
     const hasOriginal = !!sub.original || /^sub_/.test(sub.id);
     const docs = documentsFor(sub).length;
-    const link = hasOriginal
-      ? `<br><a class="rlink" role="button" tabindex="0" data-receipt="${esc(sub.id)}">receipt</a>`
-        + (docs > 1 ? `<span class="ident"> · ${docs} documents</span>` : "") : "";
+    // One line, not three. See `.rowmeta`.
+    const bits = [];
+    if (hasOriginal) bits.push(`<a class="rlink" role="button" tabindex="0" data-receipt="${esc(sub.id)}">receipt</a>`);
+    if (docs > 1) bits.push(`${docs} documents`);
+    if (sub.reference) bits.push(esc(sub.reference));
+    const meta = bits.length ? `<span class="rowmeta">${bits.join(" · ")}</span>` : "";
 
     const tr = document.createElement("tr");
     opensClaim(tr, sub.id);
-    tr.innerHTML = `<td>${esc(sub.vendor)}${link}` +
-      (sub.reference ? `<span class="refno">${esc(sub.reference)}</span>` : "") +
+    tr.innerHTML = `<td>${esc(sub.vendor)}${meta}` +
       `</td><td class="ident">${whenLabel(sub)}</td>` +
       `<td>${channelTag(sub.ch)}</td>` +
       // Both currencies where they differ, the same as the review queue.
