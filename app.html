@@ -612,6 +612,21 @@ td.mlink:hover .opens, tr:focus-within td.mlink .opens { opacity:1; }
 tr.ahead td { color:var(--muted); }
 tr.yeartotal td { border-top:2px solid var(--rule-firm); font-weight:600;
   background:var(--surface-2); }
+/* The same treatment for a list's own total. Not a row anybody can click:
+   `wireClaimRows` keys off a data attribute the rows carry and this has none,
+   so it stays inert without being told to. */
+tr.listtotal td { border-top:2px solid var(--rule-firm); font-weight:600;
+  background:var(--surface-2); }
+tr.listtotal td:first-child { font-family:"IBM Plex Mono",monospace;
+  font-size:.7rem; font-weight:400; color:var(--muted); }
+/* What the bill says, over what it comes to here. The converted line is the
+   one the total adds up, so it is the one set in the reader's own currency
+   and the billed figure above it is the quieter of the two. */
+td.amt .billed, td.out .billed { display:block; }
+td.amt .inhome { display:block; font-size:.72rem; color:var(--muted); }
+td.amt .inhome.norate { color:var(--warn); }
+td.out .billed.as { display:block; font-size:.72rem; color:var(--muted);
+  font-weight:400; }
 
 /* An assumption that moves a verdict is stated on the page, not buried in a
    log. Warm rather than red: it is a normal reading of a normal bill. */
@@ -4333,12 +4348,14 @@ function hostDetail(where) {
  * real claimed figure read as a refusal rather than as a claim nobody had got
  * to yet.
  */
-function paintQueueTiles(queue) {
-  const tiles = $("queue-tiles");
-  if (!tiles) return;
-  tiles.hidden = !queue.length;
-  if (!queue.length) return;
-
+/* What a list of claims comes to, in the organisation's own currency.
+ *
+ * One computation with two readers - the tile above the list and the total
+ * beneath it. They were going to be two sums over the same rows, and two sums
+ * over the same rows is a pair that eventually disagrees by a rounding rule
+ * nobody remembers choosing.
+ */
+function claimsTotal(subs) {
   const home = orgCurrency();
   const at = (sub, v) => {
     const ccy = String(evaluate(sub).currency || "").toUpperCase();
@@ -4348,17 +4365,32 @@ function paintQueueTiles(queue) {
   };
   // A claim whose rate could not be had counts in neither figure, and is named
   // rather than quietly summed in at nothing.
-  const stuck = queue.filter(sub => {
+  const stuck = subs.filter(sub => {
     const ccy = String(evaluate(sub).currency || "").toUpperCase();
     return ccy && ccy !== home && !(sub.payoutValue && sub.payoutValue.rate);
   }).length;
+  let total = 0;
+  subs.forEach(sub => { total += at(sub, evaluate(sub).receiptTotal); });
+  // Whether anything on the list was in another currency at all. The footer
+  // has to say "converted" only where something was converted.
+  const foreign = subs.some(sub => {
+    const ccy = String(evaluate(sub).currency || "").toUpperCase();
+    return ccy && ccy !== home;
+  });
+  return { total, stuck, foreign, home };
+}
+
+function paintQueueTiles(queue) {
+  const tiles = $("queue-tiles");
+  if (!tiles) return;
+  tiles.hidden = !queue.length;
+  if (!queue.length) return;
 
   // One figure. There used to be two - what the receipts came to, and what
   // would be released if every one were approved as it stood - and the gap
   // between them was the deduction the engine made on its own. It makes none
   // now, so the second was the first written twice.
-  let claimed = 0;
-  queue.forEach(sub => { claimed += at(sub, evaluate(sub).receiptTotal); });
+  const { total: claimed, stuck, home } = claimsTotal(queue);
 
   $("q-count").textContent = queue.length;
   $("q-claimed").textContent = fmt(claimed, home);
@@ -4831,10 +4863,70 @@ function renderQueue() {
         (dupe ? `<span class="stage s-dupe">Possible duplicate of ${esc(sub.duplicateOf)}</span>` : "") +
       `</td>` +
       `<td>${groupChip(sub)}</td>` +
-      `<td class="amt">${fmt(res.receiptTotal, res.currency)}</td>`;
+      `<td class="amt">${claimedCell(sub, res)}</td>`;
     box.appendChild(tr);
   });
+  totalRow(box, queue, QUEUE_COLUMNS.pending.length);
   wireClaimRows(box);
+}
+
+/* The sum, under the column it sums.
+ *
+ * The figure was only in the tile above the list, which is the right place
+ * for it and not the only one: somebody who has scrolled to the bottom of
+ * thirteen rows has the tile off screen, and a column of money with no total
+ * at the foot of it is a column you add up by hand.
+ *
+ * It cannot be a plain column sum, and that is the whole difficulty. The
+ * Claimed column prints each receipt in the currency it was written in -
+ * $23.60 next to ₹7,384.95 - because that is what the bill says and changing
+ * it would be us restating somebody's receipt. So the total is the converted
+ * one, at the rate stamped on each claim, and it says so rather than looking
+ * like arithmetic anybody could check by eye.
+ *
+ * Drawn from `claimsTotal`, the same call the tile makes, so the two figures
+ * are one figure.
+ */
+/* What a claim came to, as the reader needs to see it.
+ *
+ * The column printed each receipt in the currency it was written in - $23.60
+ * beside ₹7,384.95 - which is right, because that is what the bill says and
+ * restating it would be us rewriting somebody's receipt. But it left the
+ * total underneath looking like arithmetic that does not work: thirteen rows
+ * of mixed dollars and rupees over one rupee figure.
+ *
+ * So both. What the bill says, and beneath it what that comes to here, at the
+ * rate stamped on the claim when it was read. The second line is the one the
+ * total adds up, and now it is on the page to be added up.
+ *
+ * A claim already in the organisation's own currency gets one line - a second
+ * saying the identical thing is noise on every row of a rupee-only account.
+ */
+function claimedCell(sub, res) {
+  const home = orgCurrency();
+  const ccy = String(res.currency || "").toUpperCase();
+  const billed = esc(fmt(res.receiptTotal, res.currency));
+  if (!ccy || ccy === home) return billed;
+  const rate = sub.payoutValue && parseFloat(sub.payoutValue.rate);
+  return `<span class="billed">${billed}</span>`
+    + (rate
+       ? `<span class="inhome">${esc(fmt(Math.round(res.receiptTotal * rate), home))}</span>`
+       // Named rather than converted at a guess, and it is why the total
+       // says "counted as nil" for it.
+       : `<span class="inhome norate">no rate</span>`);
+}
+
+function totalRow(box, subs, columns) {
+  if (!subs.length) return;
+  const { total, stuck, foreign, home } = claimsTotal(subs);
+  const tr = document.createElement("tr");
+  tr.className = "listtotal";
+  const label = subs.length + (subs.length === 1 ? " claim" : " claims")
+    + (foreign ? ` · converted to ${home}` : "")
+    + (stuck ? ` · ${stuck} with no rate, counted as nil` : "");
+  tr.innerHTML = `<td colspan="${columns - 1}">${esc(label)}</td>`
+    + `<td class="amt">${fmt(total, home)}</td>`;
+  box.appendChild(tr);
 }
 
 /** Claims this organisation refused, on the screen where they were refused.
@@ -4882,9 +4974,12 @@ function renderQueueRejected() {
       // Word for word what the submitter was told. Without it a rejection is
       // a fact nobody can review.
       `<td class="reason">${esc(d.reason || rev.reason || "No reason recorded")}</td>` +
-      `<td class="amt">${fmt(res.receiptTotal, res.currency)}</td>`;
+      `<td class="amt">${claimedCell(sub, res)}</td>`;
     box.appendChild(tr);
   });
+  // What was refused, in one figure. The same question a reviewer asks of the
+  // pending list, asked of the list beside it.
+  totalRow(box, rejected, QUEUE_COLUMNS.rejected.length);
   wireClaimRows(box);
 }
 
@@ -8240,10 +8335,28 @@ function renderPayments() {
         ? `<td class="amt">${fmt(c.approved, ccy)}</td>`
           + `<td class="amt">${c.paid ? fmt(c.paid, ccy) : "—"}</td>`
         : "") +
-      `<td class="out ${c.outstanding === 0 ? "clear" : ""}">${fmt(c.outstanding, ccy)}</td>`;
+      // The figure owed, and what the invoice said where those differ - a
+      // payout leaves the account in the organisation's own currency, but it
+      // is reconciled against a bill written in another.
+      `<td class="out ${c.outstanding === 0 ? "clear" : ""}">`
+        + `${fmt(c.outstanding, ccy)}`
+        + (c.rate ? `<span class="billed as">${esc(fmt(c.original, c.from))}</span>` : "")
+      + `</td>`;
     tb.appendChild(tr);
 
   });
+  /* Here the column really is one currency - every payout leaves the account
+     in the organisation's own - so this is a straight sum of what is above
+     it, and the same figure as the Outstanding tile. */
+  if (awaiting.length) {
+    const tr = document.createElement("tr");
+    tr.className = "listtotal";
+    tr.innerHTML =
+      `<td colspan="${anyPartPaid ? 8 : 6}">${awaiting.length}`
+      + `${awaiting.length === 1 ? " claim" : " claims"} owed</td>`
+      + `<td class="out">${fmt(owedTotal, base)}</td>`;
+    tb.appendChild(tr);
+  }
   wireClaimRows(tb);
 }
 
