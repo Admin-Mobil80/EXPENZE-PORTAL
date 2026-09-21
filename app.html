@@ -1243,10 +1243,32 @@ td.n .pending { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:v
    how it was paid, the reference, the date, a note, the group and the button
    are one act; they were spread over three bands with a sentence between the
    fields and the thing that commits them. */
-.settle-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(122px,1fr));
+/* Seven controls and a button.
+ *
+ * At minmax(122px,1fr) they were all squeezed onto one line: a select reading
+ * "A separate payo…", a two-line "Transaction reference" label that pushed
+ * its own input a row below its neighbours, and a button whose text wrapped
+ * and spilled out of its box. Every one of those is the row being asked to
+ * hold more than it can.
+ *
+ * 168px is the width at which these labels sit on one line, so the inputs
+ * share a baseline; below that the row wraps to two, which is the right
+ * answer rather than the failure. `align-items:end` lines the boxes up
+ * against each other whatever the labels above them did. */
+.settle-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
   gap:9px 12px; align-items:start; }
-.settle-grid .sf-act { justify-content:flex-end; }
-.settle-grid .sf-act .btn { width:100%; height:30px; padding:0 10px; }
+/* Its own row at the end, at its natural width.
+ *
+ * It shared a 1fr track with the fields, so its label had to fit whatever
+ * width was left over - and "Record ₹6,632.00 as paid" wrapped onto two lines
+ * and spilled out of the box. Still inside the grid, because recording a
+ * payment is one act and the thing that commits it belongs with the fields
+ * rather than two bands below them; just on its own line, where the eye ends
+ * up after the last field and where the label can be as long as it needs. */
+.settle-grid .sf-act { grid-column:1 / -1; align-items:flex-end; }
+.settle-grid .sf-act label { display:none; }
+.settle-grid .sf-act .btn { width:auto; height:32px; padding:0 16px;
+  white-space:nowrap; }
 /* Under the row it explains, once. */
 .sf-foot { margin:2px 0 0; }
 .settle .sf label { font-size:.62rem; }
@@ -8518,8 +8540,10 @@ function settleForm(c, ccy) {
           <span class="sf-hint" id="sf-source-hint"></span></div>
         <div class="sf"><label for="sf-mode">Mode of payment</label>
           <select id="sf-mode">${PAY_MODES.map(m => `<option value="${m}">${m}</option>`).join("")}</select></div>
-        <div class="sf"><label for="sf-ref">Transaction reference</label>
-          <input type="text" id="sf-ref" placeholder="UTR / cheque no. / txn id"></div>
+        <div class="sf"><label for="sf-ref">Reference</label>
+          <input type="text" id="sf-ref" placeholder="UTR / cheque no." required>
+          <span class="sf-hint">Required \u2014 it ties this to the bank
+            statement.</span></div>
         <div class="sf"><label for="sf-date">Paid on</label>
           <input type="date" id="sf-date" value="${new Date().toISOString().slice(0,10)}"></div>
         <div class="sf"><label for="sf-note">Notes</label>
@@ -8534,7 +8558,14 @@ function settleForm(c, ccy) {
           <button class="btn primary" type="button" id="sf-go">Record ${
             esc(fmt(c.outstanding, ccy))} as paid</button></div>
       </div>
-      <p class="sf-hint sf-foot">Only the amount is required. Recording a payment does not move money &mdash; it records that you did.</p>
+      <!-- The reference used to be optional and the amount came prefilled, so
+           a payment could be recorded by pressing one button with every field
+           untouched - which is how a claim was settled in full by somebody
+           who never saw this form. Requiring the reference means recording a
+           payment cannot happen without somebody having looked up what they
+           actually paid, which is the same thing that makes the record worth
+           keeping. -->
+      <p class="sf-hint sf-foot">The amount and the transaction reference are required. Recording a payment does not move money &mdash; it records that you did.</p>
     </div>`;
 
   /* Which cost centre the money comes out of, asked where the money is paid.
@@ -8572,15 +8603,18 @@ function settleForm(c, ccy) {
    * has to be the figure in the field - otherwise the one control that says
    * what is about to happen says it about a number nobody chose. */
   const amtBox = td.querySelector("#sf-amt");
+  const refBox = td.querySelector("#sf-ref");
   const goBtn = td.querySelector("#sf-go");
   const nameTheAmount = () => {
     const minor = Math.round(parseFloat(amtBox.value || "0") * 100);
-    goBtn.textContent = minor > 0
-      ? `Record ${fmt(Math.min(minor, c.outstanding), ccy)} as paid`
-      : "Enter an amount";
-    goBtn.disabled = !(minor > 0);
+    const ref = refBox.value.trim();
+    goBtn.disabled = !(minor > 0) || !ref;
+    goBtn.textContent = !(minor > 0) ? "Enter an amount"
+      : !ref ? "Enter the transaction reference"
+      : `Record ${fmt(Math.min(minor, c.outstanding), ccy)} as paid`;
   };
   amtBox.addEventListener("input", nameTheAmount);
+  refBox.addEventListener("input", nameTheAmount);
   nameTheAmount();
 
   td.querySelector("#sf-go").addEventListener("click", () => {
@@ -8592,6 +8626,9 @@ function settleForm(c, ccy) {
     const amtEl = td.querySelector("#sf-amt");
     let minor = Math.round(parseFloat(amtEl.value || "0") * 100);
     if (!minor || minor <= 0) { amtEl.focus(); return; }
+    // Checked again here, not only on the button. The button is the ordinary
+    // way in and disabling it is the courtesy; this is the rule.
+    if (!refBox.value.trim()) { refBox.focus(); return; }
     // Never pay out more than was approved.
     if (minor > c.outstanding) { amtEl.value = (c.outstanding / 100).toFixed(2); amtEl.focus(); return; }
     pay(c, minor, minor === c.outstanding ? "Settled in full" : "Part settlement", {
@@ -8621,23 +8658,32 @@ function settleForm(c, ccy) {
   const srcWrap = td.querySelector("#sf-source-wrap");
   if (float0 && srcWrap) {
     srcWrap.hidden = false;
-    const inHand = advMinor(float0.in_hand);
+    /* Against what is still out, not what is in hand.
+     *
+     * `in hand` subtracts every claim not yet settled - including this one -
+     * so quoting it here read "the float stays at -5,632.00" on a perfectly
+     * ordinary payout, which is not a sentence anybody should have to parse
+     * while deciding how to pay somebody. `still out` is the advance the
+     * company has not yet accounted for, and it is the figure this decision
+     * actually moves. */
+    const stillOut = advMinor(float0.held);
+    const fccy = float0.currency || ccy;
     const sel = td.querySelector("#sf-source");
     const hint = td.querySelector("#sf-source-hint");
     // Defaulted to whichever is true rather than to one of them always: a
-    // claim inside the float is the ordinary case, and one beyond it cannot
-    // come out of money they do not have.
-    const fits = c.outstanding <= inHand;
+    // claim the advance can absorb is the ordinary case, and one beyond it
+    // cannot come out of money they were never given.
+    const fits = c.outstanding <= stillOut;
     sel.value = fits ? "float" : "payout";
     const say = () => {
+      const over = c.outstanding > stillOut;
       hint.textContent = sel.value === "float"
-        ? `No money moves. ${esc(float0.name || float0.email)} is carrying `
-          + `${fmt(inHand, float0.currency || ccy)}; this draws it down to `
-          + `${fmt(inHand - c.outstanding, float0.currency || ccy)}.`
-        : `Paid to them on top of the float, which stays at `
-          + `${fmt(inHand, float0.currency || ccy)}.`;
-      hint.style.color = sel.value === "float" && c.outstanding > inHand
-        ? "var(--warn)" : "var(--muted)";
+        ? `No money moves. It draws the advance down from `
+          + `${fmt(stillOut, fccy)} to ${fmt(stillOut - c.outstanding, fccy)}`
+          + (over ? " \u2014 more than was advanced." : ".")
+        : `Reimbursed on top of the float, which stays at `
+          + `${fmt(stillOut, fccy)}.`;
+      hint.style.color = sel.value === "float" && over ? "var(--warn)" : "var(--muted)";
     };
     sel.addEventListener("change", say);
     say();
