@@ -4235,8 +4235,9 @@ function siblingsFor(from) {
   // each one.
   if (from === "mine") {
     const mine = SUBMISSIONS.filter(s => isMine(s) && !isCompanion(s));
-    const closed = mineSection === "closed";
-    return mine.filter(s => isClosed(s) === closed).map(s => s.id);
+    const holds = (MINE_SECTIONS.find(([id]) => id === mineSection)
+                   || MINE_SECTIONS[0])[2];
+    return mine.filter(holds).map(s => s.id);
   }
   return [];
 }
@@ -10321,18 +10322,40 @@ function isMine(sub) {
    opening this tab is nearly always asking about something in flight. */
 let mineSection = "pending";
 
-function renderMineTabs(pending, closed) {
+/* Which of your own claims a tab holds.
+ *
+ * "Closed" held both the ones that were paid and the ones that were not,
+ * which are the two things a person most wants told apart about their own
+ * money - and the tab that grouped them answered the question with a word
+ * that means neither.
+ *
+ * Withdrawn claims sit with rejected: from the claimant's side both mean "no
+ * money is coming", and the row's own badge says which of the two it was.
+ */
+const MINE_SECTIONS = [
+  ["pending", "Pending settlement", (sub) => !isClosed(sub)],
+  ["settled", "Settled", (sub) => claimStage(sub).stage === "settled"],
+  ["rejected", "Rejected",
+   (sub) => ["rejected", "withdrawn"].includes(claimStage(sub).stage)],
+];
+
+function renderMineTabs(buckets) {
   const nav = $("m-subtabs"); if (!nav) return;
   nav.textContent = "";
-  [["pending", "Pending settlement", pending.length],
-   ["closed", "Closed", closed.length]].forEach(([id, label, count]) => {
+  MINE_SECTIONS.forEach(([id, label]) => {
+    const count = (buckets[id] || []).length;
     const b = document.createElement("button");
     b.type = "button";
     b.setAttribute("aria-current", String(mineSection === id));
     b.textContent = label;
     if (count) {
       const flag = document.createElement("span");
-      flag.className = "navflag"; flag.textContent = String(count);
+      // Grey on the two that are over. The red badge is for work somebody
+      // still has to do, and nothing on a closed claim is waiting on anybody
+      // - a count of finished things in an alarm colour is an alarm about
+      // nothing.
+      flag.className = "navflag" + (id === "pending" ? "" : " count");
+      flag.textContent = String(count);
       b.appendChild(flag);
     }
     b.addEventListener("click", () => { mineSection = id; renderMine(); });
@@ -10344,14 +10367,14 @@ function renderMine() {
   // One row per purchase. The companion is the same money on the same day from
   // the same vendor, and listing it twice reads as having been charged twice.
   const mine = SUBMISSIONS.filter(s => isMine(s) && !isCompanion(s));
-  const closed = mine.filter(isClosed);
-  const pending = mine.filter(s => !isClosed(s));
-  const shown = mineSection === "closed" ? closed : pending;
+  const buckets = {};
+  MINE_SECTIONS.forEach(([id, , holds]) => { buckets[id] = mine.filter(holds); });
+  const shown = buckets[mineSection] || buckets.pending;
 
   $("mine-sub").textContent = mine.length + (mine.length === 1 ? " submission" : " submissions");
   $("mine-banner").innerHTML =
     `<strong>Signed in as ${currentUser.name}.</strong><span>Your own receipts, whatever your role &mdash; owners and finance executives buy lunch too. Most people never open this: they send a photo on WhatsApp and get the answer back the same way.</span>`;
-  renderMineTabs(pending, closed);
+  renderMineTabs(buckets);
 
   const tb = $("mine"); tb.textContent = "";
   if (!shown.length) {
@@ -10359,8 +10382,9 @@ function renderMine() {
     tr.className = "";
     tr.innerHTML = `<td colspan="6" class="empty">${
       !mine.length ? "Nothing submitted yet. Upload a receipt above, or send one from WhatsApp."
-      : mineSection === "closed" ? "Nothing finished yet — everything you have sent is still in flight."
-      : "Nothing waiting. Everything you have sent has been settled or closed."
+      : mineSection === "settled" ? "Nothing reimbursed yet — everything you have sent is still in flight."
+      : mineSection === "rejected" ? "Nothing of yours has been refused."
+      : "Nothing waiting. Everything you have sent has been settled or refused."
     }</td>`;
     tb.appendChild(tr); return;
   }
