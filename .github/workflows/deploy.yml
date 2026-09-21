@@ -37,17 +37,36 @@ jobs:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # No build step and nothing fingerprinted: this repo is three hand-written
-      # HTML files, so every one of them is an entry point and none may be
-      # cached. A browser holding app.html keeps running the previous release
-      # even after an invalidation, which is how a reviewer ends up deciding
-      # claims against rules that changed this morning.
+      # No build step and nothing fingerprinted: the HTML files here are each
+      # an entry point and none may be cached. A browser holding app.html
+      # keeps running the previous release even after an invalidation, which
+      # is how a reviewer ends up deciding claims against rules that changed
+      # this morning.
+      #
+      # Two passes, because `--content-type` applies to every object in the
+      # sync and this repo is no longer only HTML. One flag stamped
+      # favicon.ico, the PNGs and the SVG as `text/html; charset=utf-8`, and a
+      # browser handed an .ico labelled HTML simply does not draw it - the
+      # icons would have shipped and silently not appeared.
+      #
+      # The first pass carries `--delete` and covers everything, so a file
+      # removed from the repo still leaves the bucket. The second only
+      # rewrites the content type on the HTML, and touches nothing else.
       - name: Sync
         run: |
           aws s3 sync . "s3://$BUCKET/" \
             --delete \
             --exclude ".git/*" --exclude ".github/*" \
             --exclude ".gitignore" --exclude "README.md" --exclude ".DS_Store" \
+            --cache-control "no-cache, must-revalidate"
+
+      # The charset, which the sync's own guess leaves off. Icons keep the
+      # type inferred from their extension above.
+      - name: Stamp the HTML content type
+        run: |
+          aws s3 cp "s3://$BUCKET/" "s3://$BUCKET/" \
+            --recursive --exclude "*" --include "*.html" \
+            --metadata-directive REPLACE \
             --cache-control "no-cache, must-revalidate" \
             --content-type "text/html; charset=utf-8"
 

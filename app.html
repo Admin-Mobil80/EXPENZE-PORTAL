@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>Expenze Console</title>
+<!-- Real icons, because the tab strip is how anybody finds this again.
+     Safari was drawing a generated letter on a white field, so the console,
+     the site and the BMS were three identical pale tabs in a row of twenty.
+     A solid field of colour is what the eye picks out at that size; the mark
+     only says which of ours it is. -->
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#1E7047">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
@@ -2454,6 +2463,10 @@ function evaluatePolicy(currency, lineItems, expenseType, statedTotal) {
 
   let receiptTotal = 0;
   lineItems.forEach((raw, index) => {
+    // `Number("") || 0` was already nought here, which is why the console
+    // showed a figure for a receipt the server had refused outright. Mirrors
+    // policy.py, where an unreadable line amount is now nought rather than an
+    // error - see `_money`.
     const amount = Math.round(Number(raw.amount) || 0);
     receiptTotal += amount;
     decided.push({ description: raw.description || `line ${index + 1}`, amount });
@@ -2473,7 +2486,7 @@ function evaluatePolicy(currency, lineItems, expenseType, statedTotal) {
    *
    * First in the list, because every other finding about a claim with no
    * figures is noise on top of this one. */
-  if (receiptTotal === 0 && !decided.length && printed === null) {
+  if (receiptTotal === 0 && printed === null) {
     violations.unshift({ code:"nothing_read", blocking:true, amount:null,
       msg:"Nothing could be read off this receipt — no line items and no "
         + "printed total. The photograph is likely too blurred, too dark or "
@@ -4181,6 +4194,15 @@ let claimSiblings = [];
 function siblingsFor(from) {
   if (from === "queue") return SUBMISSIONS.filter(isQueued).map(s => s.id);
   if (from === "payments") return payableClaims().map(c => c.sub.id);
+  // Your own receipts, in the tab you are looking at. Walking your own claims
+  // is the same act as a reviewer walking the queue, and there is no reason
+  // the person whose money it is should have to go back to the list between
+  // each one.
+  if (from === "mine") {
+    const mine = SUBMISSIONS.filter(s => isMine(s) && !isCompanion(s));
+    const closed = mineSection === "closed";
+    return mine.filter(s => isClosed(s) === closed).map(s => s.id);
+  }
   return [];
 }
 
@@ -4442,9 +4464,18 @@ function renderNav() {
   }
 
   if (!admin) {
-    // One surface, so no tab strip and nothing to switch between. A bar with
-    // a single tab in it is furniture, not navigation.
-    view = "mine";
+    /* One surface, so no tab strip and nothing to switch between. A bar with
+     * a single tab in it is furniture, not navigation.
+     *
+     * The claim page is not a tab, though, and this line treated it as one.
+     * A submitter clicking a row in My expenses set `view` to "claim"; the
+     * next render came straight back through here and set it to "mine"; the
+     * page never appeared and the row looked dead. Every submitter, every
+     * claim, for as long as this has existed - and invisible to anybody with
+     * a role, because a role takes the other branch.
+     *
+     * Opening one of your own receipts is what that list is for. */
+    if (view !== "claim") view = "mine";
     nav.hidden = true;
     if (sw) sw.hidden = true;
     showView();
