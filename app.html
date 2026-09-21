@@ -1762,6 +1762,11 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <div class="cleared"><span class="k">Cleared by agent</span><span class="v" id="t-cleared"></span><span class="note">Reviewed with no human involved.</span></div>
       <div class="queued"><span class="k">Awaiting a human</span><span class="v" id="t-queued"></span><span class="note" id="t-queued-note"></span></div>
       <div><span class="k">Decided by you</span><span class="v" id="t-resolved"></span><span class="note" id="t-resolved-note">This session.</span></div>
+      <!-- The other half of the same question. The auto-clear rate says how
+           much of the work the agent took off a person; this says how long
+           the person who spent the money waited for it, which is the number
+           they judge the process by and the one finance is asked about. -->
+      <div><span class="k">Time to reimburse</span><span class="v" id="t-days"></span><span class="note" id="t-days-note"></span></div>
       <div class="rate"><span class="k">Auto-clear rate</span><span class="v" id="t-rate"></span><div class="bar"><i id="t-bar"></i></div><span class="note">The number this product lives or dies on.</span></div>
     </section>
     </div>
@@ -3435,6 +3440,14 @@ function toClaim(s) {
           note: "", paidOn: s.paid_on || "", seq: 0 }
       : null,
     rejectedAt: s.outcome === "rejected" ? (s.paid_at || 0) : 0,
+    /* When the money was recorded, as a number.
+     *
+     * `settlement.at` beside it is "17 Sep" - formatted for a row to print,
+     * and useless to arithmetic. Anything measuring how long a claim took has
+     * to have the instant, so here it is, in the seconds the server sends.
+     * `at` above is in milliseconds; the two are normalised where they are
+     * compared rather than here, because rows already exist in both. */
+    settledAt: s.outcome === "settled" ? (s.paid_at || 0) : 0,
     paidBy: s.paid_by || "",
     // What a human approval released. The engine's own figure is nothing while
     // a finding blocks the claim; a reviewer who approved it anyway released
@@ -4677,6 +4690,48 @@ function renderTriage() {
   $("t-rate").textContent = rate + "%";
   $("t-bar").style.width = rate + "%";
   $("t-queued-note").textContent = queued === 0 ? "Queue is clear." : "Blocked on a judgment the rules can't make.";
+
+  /* How long a claim took to come back, over the period on screen.
+   *
+   * Every other figure on this tab is scoped to the chosen month - the note
+   * above the tiles promises it - so this one is too, and it is computed here
+   * rather than taken from the organisation-wide figure the server sends for
+   * My expenses. They answer different questions: that one is "what should I
+   * expect", this one is "how did we do in September". Each says which.
+   *
+   * Same statistic either way: the median days from the receipt arriving to
+   * the payment being recorded, over claims that were actually reimbursed.
+   */
+  /* `at` arrives in milliseconds and `paid_at` in seconds - two writers, two
+   * conventions. Subtracting one from the other gives about minus fifty-six
+   * thousand years, and a clamp at nought turns that into a confident "1 day"
+   * rather than an error. Both are normalised to seconds first. */
+  const secs = (n) => (n > 1e11 ? Math.round(n / 1000) : n);
+  const spans = period
+    .map(sub => {
+      const sent = secs(sub.at || 0), paid = secs(sub.settledAt || 0);
+      return sent && paid ? Math.max(0, paid - sent) : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a - b);
+  const days = (sec) => Math.max(1, Math.round(sec / 86400));
+  if (spans.length < 3) {
+    // Two claims is not a median. Said as a count rather than a dash, so the
+    // reader knows the figure is coming rather than broken.
+    $("t-days").textContent = "—";
+    $("t-days-note").textContent = spans.length
+      ? `${spans.length} reimbursed so far — three needed for a median.`
+      : "Nothing reimbursed in this period yet.";
+  } else {
+    const mid = spans.length >> 1;
+    const median = spans.length % 2 ? spans[mid] : (spans[mid - 1] + spans[mid]) / 2;
+    const d = days(median);
+    $("t-days").textContent = `${d} ${d === 1 ? "day" : "days"}`;
+    $("t-days-note").textContent =
+      `Median receipt to payment, over ${spans.length} reimbursed`
+      + (days(spans[spans.length - 1]) !== days(spans[0])
+         ? ` · ${days(spans[0])} to ${days(spans[spans.length - 1])}.` : ".");
+  }
 }
 
 /* The two halves of a reviewer's own work.
