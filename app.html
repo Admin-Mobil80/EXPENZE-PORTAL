@@ -1392,6 +1392,24 @@ footer.note { font-size:.78rem; color:var(--muted); max-width:84ch; line-height:
 footer.note strong { color:var(--ink-2); font-weight:600; }
 @media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important;} }
 </style>
+</head>
+<body>
+
+<!-- These two were missing, and the page closed with </body></html> anyway.
+     A parser recovers - it ends the head at the first element that cannot
+     live there and opens a body of its own - so the console rendered
+     correctly everywhere and nothing looked wrong.
+
+     The favicon is what it cost. The home page and the sign-in page, both
+     properly closed, drew the mark; the console, opened far more often than
+     either, drew Safari's generated letter instead, and no amount of
+     reloading or cache-clearing moved it, because there was nothing stale
+     about it. Same origin, same absolute icon paths, same tags in the same
+     order - the difference was that this document never said where its head
+     ended, so what Safari did with the links inside it was its own business.
+
+     Recovery is not equivalence, and this is the second time this week the
+     difference has been invisible until somebody said a thing did not work. -->
 
 <div class="wrap">
 
@@ -5587,7 +5605,30 @@ function renderDetail() {
    * A reviewer is entitled to know why they are being asked. A claim with no
    * findings is here because a person has to release it, and that is worth one
    * sentence rather than a reassurance that answers a question nobody asked. */
-  if (!res.violations.length && !sentBack && !needsGroup) {
+  /* Findings the claim has since answered.
+   *
+   * A verdict is written once, when the agent reads the receipt, and nothing
+   * re-audits a claim after a person corrects it - that was the re-check, and
+   * it was taken out deliberately, because a claim in front of a person is
+   * decided by that person. The consequence had not been followed through:
+   * "Set it before approving" went on saying so after the group had been set,
+   * and stayed on the page after the claim was approved on the strength of
+   * it. A requirement that has been met, still printed as blocking, reads as
+   * the decision having failed.
+   *
+   * Only the two this screen asks a reviewer to answer are re-checked, and
+   * both against the record rather than the dropdown, so a finding clears
+   * when the answer is saved and not when it is typed. Everything else is a
+   * fact about the bill - a cap, a duplicate, an amount over a limit - and no
+   * correction made here changes any of them.
+   */
+  const standing = res.violations.filter(v =>
+    v.code === "group_not_set" ? !sub.groupId
+    : v.code === "no_rule_for_expense_type"
+      ? !rules.types.some(t => t.enabled && t.id === (sub.type || ""))
+    : true);
+
+  if (!standing.length && !sentBack && !needsGroup) {
     const p = document.createElement("p"); p.className="empty";
     p.textContent = listed
       ? (sub.correctedAt && !decision
@@ -5598,7 +5639,7 @@ function renderDetail() {
            + "agent could not release it on its own — releasing it is yours to do.")
       : "No findings. The claim passed every rule in the active policy.";
     vbox.appendChild(p);
-  } else res.violations.forEach(v => {
+  } else standing.forEach(v => {
     const row = document.createElement("div");
     // A duplicate reads red here for the same reason it does in the queue: it
     // is the one finding whose answer is on another claim rather than on this
@@ -5680,6 +5721,38 @@ function renderDetail() {
       done.textContent = "Nothing else is waiting for review.";
       abox.appendChild(done);
     }
+    /* What the decision means, and what to do next, said where the button was.
+     *
+     * A reviewer who has just approved a claim is looking at the row they
+     * pressed the button in. What was left in it was a tick, a name, a time -
+     * and one red Reject. Read in the half-second after pressing Approve,
+     * that is a page saying the approval did not take and offering the other
+     * option, which is exactly how it was read.
+     *
+     * Nothing was wrong underneath: the claim was approved, recorded, and
+     * moved. The row simply stopped talking at the point where it had most to
+     * say. So it says where the claim went, and offers the move the reviewer
+     * actually wants - the next one - as the button their eye lands on.
+     */
+    if (decision && decision.action === "Approved" && !isPaid(sub) && !stageNow) {
+      const where = document.createElement("span");
+      where.className = "stamp done";
+      where.textContent = "In Pending settlement now — finance pays it from there.";
+      abox.appendChild(where);
+    }
+
+    // Working a queue is one decision after another, and the forward move was
+    // only ever at the top of the page, while the eye was at the bottom.
+    const at = claimSiblings.indexOf(sub.id);
+    if (mayReview && at >= 0 && claimSiblings[at + 1]) {
+      const nx = document.createElement("button");
+      nx.className = "btn primary"; nx.type = "button";
+      nx.textContent = "Next claim →";
+      nx.title = "Open the next claim in the list this one was opened from.";
+      nx.addEventListener("click", () => stepClaim(1));
+      abox.appendChild(nx);
+    }
+
     /* Refused at settlement, rather than put back in the queue.
      *
      * Reopen was here, and it undid the decision: the claim lost its approval
@@ -5695,8 +5768,13 @@ function renderDetail() {
      * approved. The reason is required and goes to them word for word. */
     if (mayReview && !isPaid(sub) && decision && decision.action !== "Rejected") {
       const no = document.createElement("button");
-      no.className = "btn danger"; no.type = "button"; no.textContent = "Reject";
-      no.title = "Refuse this claim. The submitter is told why.";
+      no.className = "btn danger"; no.type = "button";
+      // "Reject" beside a tick reads as the decision not having been taken.
+      // This one is a reversal, and saying so is the difference between an
+      // exception and the only thing on offer.
+      no.textContent = "Reject anyway";
+      no.title = "Change this decision. The claim is approved and not yet "
+        + "paid; rejecting it now stops the payment and tells the submitter why.";
       no.addEventListener("click",
         () => openReasonForm(sub, "settle_rejected", "Rejected"));
       abox.appendChild(no);
