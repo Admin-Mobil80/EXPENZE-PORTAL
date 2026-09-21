@@ -5753,7 +5753,13 @@ function renderSettleOnClaim(sub, mayReview) {
       const b = document.createElement("button");
       b.className = "btn " + cls;
       b.type = "button";
-      b.textContent = open === kind ? "Cancel" : label;
+      // "Record payment…" rather than "Record payment". This button opens a
+      // form; the button inside that form is the one that records anything,
+      // and the two were identically labelled a few pixels apart - the second
+      // appearing exactly where the first had just been clicked. Somebody
+      // pressing twice in the same spot settled a claim in full without ever
+      // seeing the fields.
+      b.textContent = open === kind ? "Cancel" : label + "\u2026";
       b.addEventListener("click", () => {
         const same = payOpen === sub.id && payOpenKind === kind;
         payOpen = same ? null : sub.id;
@@ -8522,7 +8528,11 @@ function settleForm(c, ccy) {
         <!-- In the row, not under it. The button belongs to these fields and
              was sitting a band below them with a sentence between. -->
         <div class="sf sf-act"><label for="sf-go">&nbsp;</label>
-          <button class="btn primary" type="button" id="sf-go">Record payment</button></div>
+          <!-- Named for the figure it will record, and kept in step with the
+               amount box above. A button that says what it is about to do
+               cannot be pressed by accident with the wrong number in it. -->
+          <button class="btn primary" type="button" id="sf-go">Record ${
+            esc(fmt(c.outstanding, ccy))} as paid</button></div>
       </div>
       <p class="sf-hint sf-foot">Only the amount is required. Recording a payment does not move money &mdash; it records that you did.</p>
     </div>`;
@@ -8555,6 +8565,23 @@ function settleForm(c, ccy) {
     // a gap in the middle of the row.
     wrap.hidden = true;
   }
+
+  /* The button follows the box.
+   *
+   * Part settling is done by lowering the amount, so the figure on the button
+   * has to be the figure in the field - otherwise the one control that says
+   * what is about to happen says it about a number nobody chose. */
+  const amtBox = td.querySelector("#sf-amt");
+  const goBtn = td.querySelector("#sf-go");
+  const nameTheAmount = () => {
+    const minor = Math.round(parseFloat(amtBox.value || "0") * 100);
+    goBtn.textContent = minor > 0
+      ? `Record ${fmt(Math.min(minor, c.outstanding), ccy)} as paid`
+      : "Enter an amount";
+    goBtn.disabled = !(minor > 0);
+  };
+  amtBox.addEventListener("input", nameTheAmount);
+  nameTheAmount();
 
   td.querySelector("#sf-go").addEventListener("click", () => {
     const gsel = td.querySelector("#sf-group");
