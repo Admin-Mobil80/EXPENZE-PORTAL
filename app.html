@@ -10,9 +10,9 @@
      the site and the BMS were three identical pale tabs in a row of twenty.
      A solid field of colour is what the eye picks out at that size; the mark
      only says which of ours it is. -->
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon.ico" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico?v=2" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
 <meta name="theme-color" content="#1E7047">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -622,9 +622,9 @@ tr.listtotal td:first-child { font-family:"IBM Plex Mono",monospace;
 /* What the bill says, over what it comes to here. The converted line is the
    one the total adds up, so it is the one set in the reader's own currency
    and the billed figure above it is the quieter of the two. */
-td.amt .billed, td.out .billed { display:block; }
-td.amt .inhome { display:block; font-size:.72rem; color:var(--muted); }
-td.amt .inhome.norate { color:var(--warn); }
+td.amt .billed, td.out .billed, td.n .billed { display:block; }
+td.amt .inhome, td.n .inhome { display:block; font-size:.72rem; color:var(--muted); }
+td.amt .inhome.norate, td.n .inhome.norate { color:var(--warn); }
 td.out .billed.as { display:block; font-size:.72rem; color:var(--muted);
   font-weight:400; }
 
@@ -3044,6 +3044,10 @@ async function loadRecords() {
 
   if (subs.ok && Array.isArray(subs.data.submissions)) {
     SUBMISSIONS = subs.data.submissions.map(toClaim).filter(Boolean);
+    // Computed over the organisation rather than over the rows below it: a
+    // submitter sees only their own claims, and the median of the two they
+    // happen to have had settled is not an answer to "how long will I wait".
+    TURNAROUND = subs.data.turnaround || null;
     // The reviewer's decision comes back from the server, not from whatever
     // this browser happens to remember. It used to live only in `decisions`,
     // so an approval survived until the next reload and no further - the claim
@@ -3745,6 +3749,9 @@ const channelTag = (ch) => {
    a console showing invented receipts beside real ones is worse than one
    showing none, because there is no way to tell which is which. */
 let SUBMISSIONS = [];
+// How long this organisation takes to reimburse somebody, from the server.
+// See `_turnaround` in auth.py and `turnaroundBox` below.
+let TURNAROUND = null;
 
 /* ---------- state ---------- */
 
@@ -10341,7 +10348,12 @@ function renderMine() {
       (sub.reference ? `<span class="refno">${esc(sub.reference)}</span>` : "") +
       `</td><td class="ident">${whenLabel(sub)}</td>` +
       `<td>${channelTag(sub.ch)}</td>` +
-      `<td class="n">${fmt(res.receiptTotal,res.currency)}</td>` +
+      // Both currencies where they differ, the same as the review queue.
+      // Claimed was printed in the currency of the receipt and Settled in the
+      // organisation's, so a dollar invoice put $100.00 in one column and
+      // ₹8,819.23 in the next with nothing on the row to say they were the
+      // same money. See `claimedCell`.
+      `<td class="n">${claimedCell(sub, res)}</td>` +
       // Blank, not 0.00, where nothing has been paid. A zero here read as
       // "they decided you get nothing" on claims nobody had decided at all.
       // In the organisation's currency: a payment is recorded in what left the
@@ -10372,6 +10384,39 @@ $("mine").addEventListener("keydown", (e) => {
 
 // Locally mirrored so the panel reflects a verification done in this session.
 let waState = null;
+
+/* How long the money takes to come back.
+ *
+ * Beside the two boxes saying where to send a receipt, because it answers the
+ * question those two raise. Somebody photographing a bill wants to know two
+ * things - where do I send this, and when do I get my money - and the product
+ * answered the first twice and the second nowhere.
+ *
+ * Measured end to end: from the receipt arriving to the payment being
+ * recorded, which is the whole of what the person who spent it experiences.
+ * The median rather than the mean, so one claim that sat over a holiday for
+ * three weeks does not make the figure useless - see `_turnaround` in
+ * auth.py, which computes it over the organisation rather than over the
+ * reader's own handful.
+ *
+ * Silent until there are three settled claims to go on. A new account showing
+ * "typically 1 day" on the strength of one lucky Tuesday has promised
+ * something it cannot keep, and the first person to wait a fortnight will
+ * remember that it did.
+ */
+function turnaroundBox() {
+  const t = TURNAROUND || {};
+  if (!t.days) return "";
+  const day = (n) => `${n} ${n === 1 ? "day" : "days"}`;
+  const spread = t.fastest && t.slowest && t.slowest !== t.fastest
+    ? `${t.fastest} to ${day(t.slowest)} so far`
+    : `across ${t.claims} settled ${t.claims === 1 ? "claim" : "claims"}`;
+  return `<div class="sendto">
+      <span class="k">Usually reimbursed in</span>
+      <span class="addr">${esc(day(t.days))}</span>
+      <span class="from">${esc(spread)}</span>
+    </div>`;
+}
 
 function renderWhatsApp() {
   const box = $("wapanel"); if (!box) return;
@@ -10413,7 +10458,7 @@ function renderWhatsApp() {
       : "";
 
     box.innerHTML =
-      `<div class="sendgrid">${wa}${mail}</div>` +
+      `<div class="sendgrid">${wa}${mail}${turnaroundBox()}</div>` +
       `<p class="note">Photograph the receipt and send it &mdash; nothing to install, no sign-in.
         Whichever route you use, it is read and checked against the same policy.</p>` +
       `<p class="msg" id="wa-msg" hidden></p>`;

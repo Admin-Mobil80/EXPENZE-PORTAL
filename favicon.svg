@@ -1,13 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Expenze">
-  <rect width="64" height="64" rx="13" fill="#1E7047"/>
-  <!-- Three bars rather than a letter E drawn in a font.
-       A glyph at 16px is at the mercy of whatever the renderer does with
-       hinting; three rectangles are the same three rectangles everywhere, and
-       they read as both an E and a receipt's lines, which is what the product
-       does. The middle bar is shorter, as an E's is. -->
-  <g fill="#FFFFFF">
-    <rect x="17" y="16" width="30" height="7.5" rx="3.2"/>
-    <rect x="17" y="28.25" width="21" height="7.5" rx="3.2"/>
-    <rect x="17" y="40.5" width="30" height="7.5" rx="3.2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Expenze">
+  <!-- A bill checked and ruled off. Same family as the ReconFlow mark - solid
+       tile, white round-capped strokes, one idea - without being mistaken for
+       it at tab size. -->
+  <rect width="32" height="32" rx="7.5" fill="#1E7047"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 13l5.5 5.5L24 7" stroke-width="3"/>
+    <path d="M7 23.5h18" stroke-width="2.6"/>
   </g>
 </svg>
