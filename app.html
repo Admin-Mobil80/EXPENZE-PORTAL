@@ -5465,7 +5465,8 @@ function renderDetail() {
   /* Being saved. Not being re-decided - nothing re-decides a claim that has
    * reached a person. See `saveAnswers`. */
   const saving = savingOf === sub.id;
-  const frozen = paid || unread || saving || !reviewingHere();
+  const deciding = decidingOf === sub.id;
+  const frozen = paid || unread || saving || deciding || !reviewingHere();
   ["headcount", "src", "etype", "ccy", "claim-group"].forEach(id => {
     const el = $(id); if (el) el.disabled = frozen;
   });
@@ -5676,7 +5677,21 @@ function renderDetail() {
     abox.appendChild(wd);
   }
 
-  if (saving) {
+  if (deciding) {
+    /* The decision is being recorded, and nothing else is on offer.
+     *
+     * Not a disabled button with its old label on it: "Approve as reviewed",
+     * greyed, says the press did not register. A line that says what is
+     * happening says the opposite, and it is the truth.
+     */
+    const s = document.createElement("span");
+    s.className = "stamp working";
+    const dot = document.createElement("span");
+    dot.className = "busydot"; dot.setAttribute("aria-hidden", "true");
+    s.append(dot, document.createTextNode("Recording your decision…"));
+    s.setAttribute("role", "status");
+    abox.appendChild(s);
+  } else if (saving) {
     // A write, not a decision. It is quick and it changes nothing about the
     // claim except the facts the reviewer just supplied, but the buttons go
     // while it is in flight so nothing is decided against a half-saved claim.
@@ -5753,32 +5768,23 @@ function renderDetail() {
       abox.appendChild(nx);
     }
 
-    /* Refused at settlement, rather than put back in the queue.
+    /* And no way to undo it from here.
      *
-     * Reopen was here, and it undid the decision: the claim lost its approval
-     * and returned to the review queue for somebody to decide again. That is
-     * the wrong instrument for what actually stops a payment at this stage.
-     * The bill never arrived, or the paper does not match what was claimed -
-     * neither is a judgment a reviewer can remake, because neither is about
-     * the claim as submitted. Sending it back asks a person to look again at
-     * something they read correctly the first time.
+     * There was a Reject on this row - first as "Reopen", which put the claim
+     * back in the queue, then as a rejection at settlement. Both were answers
+     * to "what if the bill never arrives", and neither belonged in front of
+     * the person who had just decided the claim.
      *
-     * Rejecting says what happened, records who said it, and tells the
-     * submitter - who is expecting the money, having already been told it was
-     * approved. The reason is required and goes to them word for word. */
-    if (mayReview && !isPaid(sub) && decision && decision.action !== "Rejected") {
-      const no = document.createElement("button");
-      no.className = "btn danger"; no.type = "button";
-      // "Reject" beside a tick reads as the decision not having been taken.
-      // This one is a reversal, and saying so is the difference between an
-      // exception and the only thing on offer.
-      no.textContent = "Reject anyway";
-      no.title = "Change this decision. The claim is approved and not yet "
-        + "paid; rejecting it now stops the payment and tells the submitter why.";
-      no.addEventListener("click",
-        () => openReasonForm(sub, "settle_rejected", "Rejected"));
-      abox.appendChild(no);
-    }
+     * A decision is a decision. The reviewer read the bill, the findings and
+     * the figures, and said yes; the submitter has been told so in writing and
+     * is expecting the money. Offering to take it back in the same breath
+     * makes the approval look provisional, which it is not, and put the one
+     * red button on the screen next to a tick - read, reasonably, as the
+     * approval having failed.
+     *
+     * What stops a payment now is finance declining to make it, on the screen
+     * where payments are made. That is the right place for it: it is a
+     * question about the money, not about the judgment. */
   } else if (agentMayRelease(sub)) {
     const s = document.createElement("span"); s.className="stamp";
     // No longer has a "your correction released it" arm. A corrected claim
@@ -6858,8 +6864,20 @@ async function decide(sub, action, button, opts) {
     return;
   }
 
-  const was = button ? button.textContent : "";
-  if (button) { button.disabled = true; button.textContent = "Saving…"; }
+  /* Held from the press to the last render, not just across the write.
+   *
+   * The label went back on the button the moment `/claim/review` returned,
+   * which is the fast half - `loadRecords` follows it, and for the whole of
+   * that the row showed a live Approve on a claim that had already been
+   * approved. Press it twice in that window and the second press is a second
+   * decision on the same claim. Then the page changed with no warning.
+   *
+   * The flag is read by the renderer, so every way in is held at once and the
+   * state survives the re-render that replaces the button.
+   */
+  decidingOf = sub.id;
+  renderAll();
+
   let ok = false, data = {};
   try {
     ({ ok, data } = await authCall("/claim/review",
@@ -6867,8 +6885,12 @@ async function decide(sub, action, button, opts) {
   } catch (_) {
     data = { error: "Network error — nothing was recorded." };
   }
-  if (button) { button.disabled = false; button.textContent = was; }
-  if (!ok) { say(data.error || "Could not record that decision.", false); return; }
+  if (!ok) {
+    decidingOf = null;
+    renderAll();
+    say(data.error || "Could not record that decision.", false);
+    return;
+  }
 
   const slot = $("settle-slot");
   if (slot) slot.textContent = "";
@@ -6899,8 +6921,13 @@ async function decide(sub, action, button, opts) {
   }
 
   // Read back rather than trusted: the server may have decided something about
-  // this claim that the browser cannot work out for itself.
-  await loadRecords();
+  // this claim that the browser cannot work out for itself. The row stays held
+  // for this too - it is the half that takes the time.
+  try {
+    await loadRecords();
+  } finally {
+    decidingOf = null;
+  }
   /* Whether that was the last one waiting.
    *
    * Recorded here rather than worked out while rendering, because by then the
@@ -11080,6 +11107,21 @@ $("etype").addEventListener("change", e => {
  */
 // The claim whose answers are being written, while the write is in flight.
 let savingOf = null;
+/* And the claim whose decision is being recorded.
+ *
+ * A flag rather than state on the button, for the reason `savingOf` is one:
+ * the row is rebuilt on every render, and the button in flight is not the
+ * button that comes back.
+ *
+ * `decide` used to put "Saving…" on the button it was given and restore the
+ * label as soon as the write returned - before `loadRecords`, which is the
+ * slow half. So for the length of a full reload the row looked idle, with a
+ * live Approve on a claim that had just been approved, and then the page
+ * changed under the reader with no warning. Every way in is held at once now,
+ * and the renderer draws the state, so whatever is on screen is telling the
+ * truth about what the system is doing.
+ */
+let decidingOf = null;
 // Which claim the line under the controls is about, so it can be dropped when
 // the page moves to another one. See `renderDetail`.
 let answerMsgFor = null;
