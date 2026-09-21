@@ -1461,6 +1461,11 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
     <div id="split-queue">
       <section class="panel" id="queue-list">
         <header><h2>Review queue</h2><span class="sub" id="queue-count"></span></header>
+        <!-- Shown to a finance executive, who can read this list and open
+             anything on it but decides none of it. Reviewing and paying are
+             two jobs; the whole value of separating them is lost if the
+             person who moves the money also releases it. -->
+        <div class="banner" id="queue-banner" hidden></div>
         <!-- The same table as Pending settlement, column for column where the
              column means the same thing. They are the two lists a reviewer
              works, one after the other, and a list that changes shape between
@@ -2811,6 +2816,20 @@ const can = {
   transfer:   () => currentUser.tier === "owner",
   editPeople: () => rankOf(currentUser.tier) >= RANK.finance,
   seeQueue:   () => rankOf(currentUser.tier) >= RANK.finance,
+  /* Deciding a claim, as opposed to paying one.
+   *
+   * Two jobs, and giving both to one person removes the only check the
+   * product has: a reviewer decides what the company owes, and somebody else
+   * moves the money. So this floor is administrator, above `seeQueue` - which
+   * stays at finance, because a finance executive still reads the queue, the
+   * people list and the reports; they simply do not decide.
+   *
+   * Sending a claim back for review is not here. That is `mayDispute`: it
+   * decides nothing, it hands the claim to the people whose job deciding is,
+   * and taking it away would leave finance with pay-it-or-refuse-it on a
+   * claim they doubt. */
+  review:     () => rankOf(currentUser.tier) >= RANK.admin,
+  dispute:    () => rankOf(currentUser.tier) >= RANK.finance,
 };
 
 // Channel addresses are platform-wide and set in BMS, not per organisation:
@@ -4648,6 +4667,22 @@ function paintQueueTabs() {
 function renderQueue() {
   paintQueueTabs();
   paintQueueHead();
+
+  /* Why this list is read-only, for the one role it is read-only for.
+   *
+   * A finance executive sees the queue - they need to know what is coming
+   * and they settle everything that leaves it - and decides none of it. A
+   * list of claims with no buttons and no explanation reads as a fault. */
+  const qb = $("queue-banner");
+  if (qb) {
+    const watching = can.seeQueue() && !can.review();
+    qb.hidden = !watching;
+    if (watching) {
+      qb.innerHTML = "<strong>Read-only.</strong><span>Deciding a claim is an "
+        + "owner's or an administrator's. You settle what they release, which "
+        + "is why the two are kept apart.</span>";
+    }
+  }
   if (queueTab === "rejected") return renderQueueRejected();
 
   const box = $("queue"); box.textContent = "";
@@ -5104,9 +5139,9 @@ function renderDetail() {
      * can be held *on* the group, so the person unblocking it has to be able
      * to answer here. At settlement the question belongs beside the amount,
      * the mode and the reference, which is the rest of what a payment is. */
-    const settlingHere = reviewingHere() && !isPaid(sub)
+    const payingHere = settlingHere() && !isPaid(sub)
       && payableClaims().some(c => c.sub.id === sub.id && c.outstanding > 0);
-    gfield.hidden = !groups.length || settlingHere;
+    gfield.hidden = !groups.length || payingHere;
     if (groups.length) {
       const g = groupOf(sub);
       const gs = $("claim-group"); gs.textContent = "";
@@ -5466,10 +5501,18 @@ function renderDetail() {
     abox.appendChild(s4);
   } else if (!mayReview) {
     const s2 = document.createElement("span"); s2.className="stamp pending";
-    // Said differently depending on whose move it is. "With Finance" is wrong
-    // when the claim is sitting on a question only this person can answer.
+    /* Said differently depending on whose move it is, and who is asking.
+     *
+     * "You will hear the outcome by email and WhatsApp" is the submitter's
+     * line. A finance executive reaches this branch too now that deciding is
+     * an owner's or an administrator's act - and telling them to watch their
+     * inbox for a claim sitting on somebody else's desk is not an answer to
+     * the question they have, which is why they cannot act on it. */
     s2.textContent = asking
       ? "Waiting on your answer above. Nothing else is in question."
+      : can.seeQueue()
+      ? "Awaiting review by an owner or administrator. Paying it is yours "
+        + "once they have released it."
       : "In review. You will hear the outcome by email and WhatsApp.";
     abox.appendChild(s2);
   } else if (isPaid(sub)) {
@@ -5646,7 +5689,8 @@ function renderDetail() {
     vbox2.appendChild(p2);
   }
 
-  renderSettleOnClaim(sub, mayReview);
+  // Paying, not deciding. See `settlingHere`.
+  renderSettleOnClaim(sub, settlingHere());
 
   paintWhatTheyWereTold(sub, w);
 }
@@ -5710,13 +5754,13 @@ function paintWhatTheyWereTold(sub, w) {
 }
 
 /** Record a payment, or refuse one, from the claim itself. */
-function renderSettleOnClaim(sub, mayReview) {
+function renderSettleOnClaim(sub, maySettle) {
   const slot = $("settle-slot");
   if (!slot) return;
   slot.textContent = "";
 
   const c = payableClaims().find(x => x.sub.id === sub.id);
-  if (!c || !mayReview || c.outstanding <= 0) return;
+  if (!c || !maySettle || c.outstanding <= 0) return;
 
   /* Not while somebody is working the review queue.
    *
@@ -5807,11 +5851,30 @@ function renderSettleOnClaim(sub, mayReview) {
  * The claim page inherits it from wherever it was opened, so a claim reached
  * from Pending settlement reviews and one reached from My expenses does not.
  */
-function reviewingHere() {
-  if (!can.seeQueue()) return false;
+/** A screen where somebody else's claim is in front of you at all.
+ *
+ * Not your own expenses, where you are the claimant and decide nothing. */
+function aboutSomebodyElsesClaim() {
   if (view === "queue") return true;
   if (view === "claim") return claimFrom !== "mine";
+  // Pending settlement has its own controls on its own rows; a claim opened
+  // from there goes to the claim page, handled above. Every other screen
+  // falls through to false.
   return false;
+}
+
+/** Whether a claim can be *decided* here - approved, rejected, re-typed. */
+function reviewingHere() {
+  return can.review() && aboutSomebodyElsesClaim();
+}
+
+/** Whether a payment can be *recorded* here.
+ *
+ * A lower bar than deciding, and the distinction is the point: a finance
+ * executive pays what somebody else approved. Gating the payment controls on
+ * `reviewingHere` would have locked them out of the one job that is theirs. */
+function settlingHere() {
+  return can.seeQueue() && aboutSomebodyElsesClaim();
 }
 /* Where Back goes: where the reader came from.
  *
