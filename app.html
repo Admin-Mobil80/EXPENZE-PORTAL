@@ -3827,7 +3827,10 @@ const currencyAssumed = (sub) => !sub.currency;
  * from. Kept on the copy so a later change on the server can be told apart
  * from a change the reviewer made here. */
 function seedOf(sub) {
-  return [sub.type || "", sub.currency || ""].join("\u0000");
+  // The group is in the seed for the same reason the type is: a reviewer's
+  // unsaved pick has to be discarded once the record itself has moved, or the
+  // screen goes on offering a choice that something else already answered.
+  return [sub.type || "", sub.currency || "", sub.groupId || ""].join("\u0000");
 }
 
 function workingCopy(sub) {
@@ -4059,7 +4062,21 @@ function dayStamp(iso) {
     : { day:"numeric", month:"short", year:"numeric" });
 }
 
-const isPristine = (sub,w) => w.type===(sub.type||"meals") && w.currency===(sub.currency||orgCurrency());
+/* Nothing on this claim has been changed here and left unsent.
+ *
+ * The group belongs in this comparison and was missing from it, which cost a
+ * reviewer three refused approvals. Picking a cost centre writes it to the
+ * working copy and nowhere else, and `groupOf` reads the working copy first -
+ * so choosing one silenced the "no group set" finding, uncovered Approve, and
+ * sent a claim to a server that still had no group on the record and refused
+ * it. The screen said the question was answered; the record said it was not.
+ *
+ * `"group" in w` is the test, not `w.group`: clearing a group a reviewer
+ * disagrees with is a real change, and "" is its real value.
+ */
+const isPristine = (sub,w) => w.type===(sub.type||"meals")
+  && w.currency===(sub.currency||orgCurrency())
+  && (!("group" in w) || (w.group||"") === (sub.groupId||""));
 /* Still being read, rather than waiting for anybody.
  *
  * `queued` and `auditing` are the agent's own states. A receipt in one of
@@ -5394,9 +5411,16 @@ function renderDetail() {
   // The save appears when a reviewer has actually changed something, not only
   // when the claim is untagged: correcting a misread currency matters most on
   // a claim that otherwise looks fine.
+  //
+  // The group is compared against the record, not against `groupOf(sub)`.
+  // `groupOf` reads the working copy first, so that comparison was `w.group`
+  // against itself and could never be true: picking a cost centre produced no
+  // Save button at all, while separately clearing the finding that would have
+  // said one was needed. The reviewer was left with an answered-looking screen,
+  // nothing to press to record it, and an Approve the server then refused.
   const changed = !frozen
     && (w.type !== (sub.type || "meals") || w.currency !== (res.currency || "")
-        || (w.group || "") !== (groupOf(sub).id || ""));
+        || (("group" in w) && (w.group || "") !== (sub.groupId || "")));
   // The panel's own copy stays hidden. It is kept in the DOM because it owns
   // the handler both routes call, and shown nowhere: the visible control sits
   // in the decision row with Approve and Reject, and two of one button made
@@ -5495,7 +5519,13 @@ function renderDetail() {
 
   const needsGroup = !decision && !stage
     && (ORG_PROFILE.groups || []).length && !groupOf(sub).id;
-  if (needsGroup) {
+  // Said once. The agent raises `group_not_set` itself when it leaves the
+  // group open, and that finding is printed below with the rest of them - so
+  // adding this row unconditionally put the same requirement on screen twice,
+  // in two different wordings, on exactly the claims where it mattered most.
+  // This row is for the case the agent had no reason to flag: a claim whose
+  // group was cleared here, or one stored before the check existed.
+  if (needsGroup && !res.violations.some(v => v.code === "group_not_set")) {
     const row = document.createElement("div");
     row.className = "violation blocking";
     const code = document.createElement("code"); code.textContent = "group_not_set";
@@ -5817,6 +5847,8 @@ function renderDetail() {
         ? `Expense type → ${(findType(w.type) || {}).label || w.type}` : "",
       w.currency !== (sub.currency || orgCurrency())
         ? `Currency → ${w.currency}` : "",
+      ("group" in w) && (w.group || "") !== (sub.groupId || "")
+        ? `Group → ${w.group ? groupLabel(w.group) : "none"}` : "",
     ].filter(Boolean).join(" · ");
 
     s.textContent = unsaved
