@@ -10449,8 +10449,30 @@ let waState = null;
  */
 function turnaroundBox() {
   const t = TURNAROUND || {};
-  if (!t.days) return "";
   const day = (n) => `${n} ${n === 1 ? "day" : "days"}`;
+
+  /* Shown even before there is a figure.
+   *
+   * It used to draw nothing until three claims had been settled, which left
+   * a gap in a row of three boxes and no way for the reader to tell whether
+   * the product had no answer or had simply not been built to give one. A
+   * box saying what it is waiting for is an answer; an absence is not.
+   */
+  const waiting = t.waiting
+    ? ` ${t.waiting} unpaid, oldest ${day(t.waiting_oldest)}.`
+    : "";
+
+  if (!t.days) {
+    return `<div class="sendto off">
+        <span class="k">Usually reimbursed in</span>
+        <span class="addr">&mdash;</span>
+        <span class="from">${esc((t.claims
+          ? `${t.claims} settled so far — a typical time appears at three.`
+          : "Nothing settled yet — a typical time appears once three claims have been.")
+          + waiting)}</span>
+      </div>`;
+  }
+
   /* The second line is where the figure is kept honest.
    *
    * "Usually 2 days" is a comfortable thing to read and a false one while a
@@ -10470,6 +10492,7 @@ function turnaroundBox() {
       <span class="from">${esc(spread)}</span>
     </div>`;
 }
+
 
 function renderWhatsApp() {
   const box = $("wapanel"); if (!box) return;
