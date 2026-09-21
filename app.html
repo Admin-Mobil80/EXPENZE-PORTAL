@@ -4691,46 +4691,34 @@ function renderTriage() {
   $("t-bar").style.width = rate + "%";
   $("t-queued-note").textContent = queued === 0 ? "Queue is clear." : "Blocked on a judgment the rules can't make.";
 
-  /* How long a claim took to come back, over the period on screen.
+  /* How long this organisation takes to reimburse somebody.
    *
-   * Every other figure on this tab is scoped to the chosen month - the note
-   * above the tiles promises it - so this one is too, and it is computed here
-   * rather than taken from the organisation-wide figure the server sends for
-   * My expenses. They answer different questions: that one is "what should I
-   * expect", this one is "how did we do in September". Each says which.
-   *
-   * Same statistic either way: the median days from the receipt arriving to
-   * the payment being recorded, over claims that were actually reimbursed.
+   * The one figure the server computes, the same one My expenses shows. It
+   * was briefly computed here as well, scoped to the month on screen - which
+   * is consistent with every other tile on this tab and wrong for this one:
+   * two numbers that can disagree on two screens about one question. It is a
+   * property of the organisation's process, so it is organisation-wide and
+   * over every claim ever submitted, and the note says so rather than letting
+   * the period banner above imply otherwise.
    */
-  /* `at` arrives in milliseconds and `paid_at` in seconds - two writers, two
-   * conventions. Subtracting one from the other gives about minus fifty-six
-   * thousand years, and a clamp at nought turns that into a confident "1 day"
-   * rather than an error. Both are normalised to seconds first. */
-  const secs = (n) => (n > 1e11 ? Math.round(n / 1000) : n);
-  const spans = period
-    .map(sub => {
-      const sent = secs(sub.at || 0), paid = secs(sub.settledAt || 0);
-      return sent && paid ? Math.max(0, paid - sent) : null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => a - b);
-  const days = (sec) => Math.max(1, Math.round(sec / 86400));
-  if (spans.length < 3) {
-    // Two claims is not a median. Said as a count rather than a dash, so the
-    // reader knows the figure is coming rather than broken.
+  const t = TURNAROUND || {};
+  const dayWord = (n) => `${n} ${n === 1 ? "day" : "days"}`;
+  // What is still waiting, beside the figure. A median over settled claims
+  // alone is a survivorship lie - it would read "2 days" on the strength of
+  // one reimbursed claim while twenty-one others had waited up to six.
+  const queueNote = t.waiting
+    ? ` ${t.waiting} still unpaid, oldest ${dayWord(t.waiting_oldest)}.`
+    : "";
+  if (!t.days) {
     $("t-days").textContent = "—";
-    $("t-days-note").textContent = spans.length
-      ? `${spans.length} reimbursed so far — three needed for a median.`
-      : "Nothing reimbursed in this period yet.";
+    $("t-days-note").textContent = (t.claims
+      ? `${t.claims} reimbursed so far — three needed for a median.`
+      : "Nothing reimbursed yet.") + queueNote;
   } else {
-    const mid = spans.length >> 1;
-    const median = spans.length % 2 ? spans[mid] : (spans[mid - 1] + spans[mid]) / 2;
-    const d = days(median);
-    $("t-days").textContent = `${d} ${d === 1 ? "day" : "days"}`;
+    $("t-days").textContent = dayWord(t.days);
     $("t-days-note").textContent =
-      `Median receipt to payment, over ${spans.length} reimbursed`
-      + (days(spans[spans.length - 1]) !== days(spans[0])
-         ? ` · ${days(spans[0])} to ${days(spans[spans.length - 1])}.` : ".");
+      `Median receipt to payment, all claims, over ${t.claims} reimbursed.`
+      + queueNote;
   }
 }
 
@@ -10463,7 +10451,17 @@ function turnaroundBox() {
   const t = TURNAROUND || {};
   if (!t.days) return "";
   const day = (n) => `${n} ${n === 1 ? "day" : "days"}`;
-  const spread = t.fastest && t.slowest && t.slowest !== t.fastest
+  /* The second line is where the figure is kept honest.
+   *
+   * "Usually 2 days" is a comfortable thing to read and a false one while a
+   * backlog is sitting unpaid - and the person reading it is the one waiting,
+   * so they are exactly who should not be told the flattering half. Where
+   * anything has been waiting longer than the typical claim takes, that is
+   * what the line says; otherwise it gives the range.
+   */
+  const spread = t.waiting && t.waiting_oldest > t.days
+    ? `some are waiting longer — oldest ${day(t.waiting_oldest)}`
+    : t.fastest && t.slowest && t.slowest !== t.fastest
     ? `${t.fastest} to ${day(t.slowest)} so far`
     : `across ${t.claims} settled ${t.claims === 1 ? "claim" : "claims"}`;
   return `<div class="sendto">
