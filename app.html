@@ -5766,23 +5766,38 @@ function renderDetail() {
       abox.appendChild(nx);
     }
 
-    /* And no way to undo it from here.
+    /* Refusing to pay it - on the screen where it is paid, and only there.
      *
-     * There was a Reject on this row - first as "Reopen", which put the claim
-     * back in the queue, then as a rejection at settlement. Both were answers
-     * to "what if the bill never arrives", and neither belonged in front of
-     * the person who had just decided the claim.
+     * This button has had three lives on this row and the first two were
+     * wrong in the same way. As "Reopen" it undid the approval and sent the
+     * claim back to the queue; as "Reject anyway" it sat beside the tick a
+     * reviewer had just earned, the one red thing on the screen, and read as
+     * the approval having failed.
      *
-     * A decision is a decision. The reviewer read the bill, the findings and
-     * the figures, and said yes; the submitter has been told so in writing and
-     * is expecting the money. Offering to take it back in the same breath
-     * makes the approval look provisional, which it is not, and put the one
-     * red button on the screen next to a tick - read, reasonably, as the
-     * approval having failed.
+     * The fault in both was placing it by the claim's *state* rather than by
+     * where the reader is standing. Those are two different people doing two
+     * different jobs. A reviewer who has just approved a claim is not being
+     * asked whether to pay it; offering to take the decision back in the same
+     * breath makes the approval look provisional, which it is not. Finance,
+     * opening the same claim from Pending settlement, is being asked exactly
+     * that - and "the bill never arrived" or "the paper does not match" are
+     * their reasons to refuse, answerable by nobody else.
      *
-     * What stops a payment now is finance declining to make it, on the screen
-     * where payments are made. That is the right place for it: it is a
-     * question about the money, not about the judgment. */
+     * So: `claimFrom`, the same line `renderSettleOnClaim` draws, for the same
+     * reason. And `settlingHere` rather than `reviewingHere`, because a
+     * finance executive may not decide a claim but may certainly decline to
+     * pay one - gating this on the reviewer's bar locked the role out of the
+     * one screen that is theirs. */
+    if (settlingHere() && !isPaid(sub) && claimFrom !== "queue"
+        && decision && decision.action !== "Rejected" && !rejections[sub.id]) {
+      const no = document.createElement("button");
+      no.className = "btn danger"; no.type = "button"; no.textContent = "Reject";
+      no.title = "Refuse to pay this claim. The submitter is told why, and it "
+        + "leaves the payment run.";
+      no.addEventListener("click",
+        () => openReasonForm(sub, "settle_rejected", "Rejected"));
+      abox.appendChild(no);
+    }
   } else if (agentMayRelease(sub)) {
     const s = document.createElement("span"); s.className="stamp";
     // No longer has a "your correction released it" arm. A corrected claim
@@ -5811,7 +5826,10 @@ function renderDetail() {
      * list with a note attached.
      *
      * What is left is the honest pair: correct it above, or refuse it. */
-    if (mayReview && !isPaid(sub) && !rejections[sub.id]) {
+    // `settlingHere`, not `mayReview`: this claim is in Pending settlement by
+    // definition - the agent cleared it - so the person looking at it is the
+    // person about to pay it, and refusing to pay is theirs to do.
+    if (settlingHere() && !isPaid(sub) && !rejections[sub.id]) {
       const no = document.createElement("button");
       no.className = "btn danger"; no.type = "button"; no.textContent = "Reject";
       no.title = "Refuse this claim. The submitter is told why.";
