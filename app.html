@@ -1400,6 +1400,9 @@ td.pick input:disabled { cursor:not-allowed; opacity:.35; }
   border:1px solid var(--rule-firm); border-radius:var(--radius);
   background:var(--surface); color:var(--ink); margin-left:auto; }
 .payfind:focus-visible { outline:2px solid var(--focus); outline-offset:-1px; }
+/* The bulk setters sit with the filter, narrower - they are actions on a
+   selection rather than a place to type. */
+.qbulk { width:auto; min-width:152px; margin-left:0; }
 .payfind::placeholder { color:var(--muted); }
 .paymsg { margin:0 14px 12px; padding:10px 13px; border-radius:var(--radius);
   font-size:.86rem; font-weight:500; display:flex; align-items:center; gap:9px; }
@@ -1649,6 +1652,12 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
              nineteen. The filter makes the queue that person's, and the
              checkboxes let a reviewer say yes to what they have read. -->
           <input type="search" id="q-who" class="payfind" placeholder="Filter by submitter" aria-label="Filter by submitter" autocomplete="off">
+          <!-- Setting these on a stack at once is the answer to a queue where
+               eighteen of twenty claims were missing one of them. Both are
+               facts about what a receipt is, and somebody working a colleague's
+               WhatsApp receipts knows the answer for all of them together. -->
+          <select id="q-settype" class="payfind qbulk" hidden aria-label="Set expense type on the selected claims"></select>
+          <select id="q-setgroup" class="payfind qbulk" hidden aria-label="Set group on the selected claims"></select>
           <button class="btn primary" type="button" id="q-approve" hidden>Approve selected</button></header>
         <!-- Shown to a finance executive, who can read this list and open
              anything on it but decides none of it. Reviewing and paying are
@@ -5049,6 +5058,92 @@ function payBlocker(sub) {
   return "";
 }
 
+/* The two dropdowns that set a field on everything ticked.
+ *
+ * Rebuilt on every paint rather than once, because the policy's types and the
+ * organisation's groups are both editable on other screens - a list built at
+ * load would go stale the moment somebody added a type, which is exactly when
+ * a reviewer would reach for it.
+ *
+ * They read "Set expense type…" rather than showing a current value, because
+ * there is no current value: twelve claims may carry twelve different types,
+ * and a dropdown showing one of them would be lying about the other eleven.
+ * Picking is the action; there is nothing to save afterwards.
+ *
+ * Only for more than one claim. Setting a field on a single claim is what the
+ * claim page is for, and it shows the whole bill while you do it.
+ */
+function paintBulkFields() {
+  const chosen = queueRows().filter(sub => picked.has(sub.id));
+  const show = can.review() && chosen.length > 1;
+
+  const typeSel = $("q-settype");
+  if (typeSel) {
+    typeSel.hidden = !show;
+    typeSel.disabled = bulkSaving;
+    if (show) {
+      typeSel.innerHTML = `<option value="">Set expense type…</option>`
+        + rules.types.filter(t => t.enabled)
+            .map(t => `<option value="${esc(t.id)}">${esc(t.label || t.id)}</option>`)
+            .join("");
+      typeSel.value = "";
+    }
+  }
+
+  const groupSel = $("q-setgroup");
+  if (groupSel) {
+    // Nothing to set where the organisation runs no cost centres.
+    groupSel.hidden = !show || !(ORG_PROFILE.groups || []).length;
+    groupSel.disabled = bulkSaving;
+    if (!groupSel.hidden) {
+      groupSel.innerHTML = `<option value="">Set group…</option>`
+        + (ORG_PROFILE.groups || [])
+            .map(g => `<option value="${esc(g.id)}">${esc(g.label || g.id)}</option>`)
+            .join("");
+      groupSel.value = "";
+    }
+  }
+}
+
+let bulkSaving = false;
+
+/** Write one field onto every ticked claim. */
+async function setOnPicked(field, value) {
+  if (bulkSaving || !value) return;
+  const chosen = queueRows().filter(sub => picked.has(sub.id));
+  if (!chosen.length) return;
+
+  bulkSaving = true;
+  paintBulkFields();
+  let ok = false, data = {};
+  try {
+    ({ ok, data } = await authCall("/claim/retype-batch", {
+      submission_ids: chosen.map(s => s.id),
+      ...(field === "type" ? { expense_type: value } : { group_id: value }),
+    }));
+  } catch (_) {
+    data = { error: "Network error — nothing was changed." };
+  }
+  bulkSaving = false;
+
+  if (!ok) {
+    say(data.error || "Could not change those claims.", false);
+    paintBulkFields();
+    return;
+  }
+  /* The selection is kept.
+   *
+   * Setting the type on twelve claims and then the group on the same twelve
+   * is the ordinary way this gets used, and clearing the ticks in between
+   * would make one piece of work into two. */
+  const label = field === "type"
+    ? ((findType(value) || {}).label || value)
+    : groupLabel(value);
+  say(`${data.count} claims set to ${label}.`, true);
+  await loadRecords();
+  renderAll();
+}
+
 /** The button, saying what it will do and to how many. */
 function paintApproveButton() {
   const btn = $("q-approve");
@@ -5372,6 +5467,7 @@ function renderQueue() {
       if (cb.checked) picked.add(cb.dataset.pick);
       else picked.delete(cb.dataset.pick);
       paintApproveButton();
+      paintBulkFields();
     });
   });
   const all = $("q-all");
@@ -5381,6 +5477,7 @@ function renderQueue() {
     all.checked = !!ready.length && ready.every(sub => picked.has(sub.id));
   }
   paintApproveButton();
+  paintBulkFields();
   wireClaimRows(box);
 }
 
@@ -9044,6 +9141,8 @@ $("q-who").addEventListener("keydown", (e) => {
   if (e.key === "Escape" && e.target.value) { e.target.value = ""; renderQueue(); }
 });
 $("q-approve").addEventListener("click", approvePicked);
+$("q-settype").addEventListener("change", (e) => setOnPicked("type", e.target.value));
+$("q-setgroup").addEventListener("change", (e) => setOnPicked("group", e.target.value));
 
 $("pay-who").addEventListener("input", () => renderPayments());
 // Escape clears it, which is what a search box does everywhere else.
