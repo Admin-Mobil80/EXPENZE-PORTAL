@@ -9437,7 +9437,22 @@ async function tellClaimant(claim, kind, detail) {
   if (sessionToken() && /^sub_/.test(claim.sub.id)) {
     const { ok, data } = await authCall("/claim/outcome", {
       submission_id: claim.sub.id, kind,
-      vendor: claim.sub.vendor, currency: claim.res.currency,
+      vendor: claim.sub.vendor,
+      /* The currency the money left in, not the one the bill was written in.
+       *
+       * Every figure below this line is a payout figure - `payableClaims`
+       * converts once, at the rate stamped on the claim, and the settlement
+       * side of this console counts in the organisation's own currency
+       * throughout. This field was the receipt's currency, so a $20.00 Cursor
+       * invoice reimbursed for INR 1,920.43 told the submitter "Paid: USD
+       * 1,920.43" and wrote the same thing into the audit log: a rupee figure
+       * wearing a dollar sign, ninety-six times too large, in the one message
+       * a person checks against their bank statement.
+       *
+       * `payCcy` is the same field the Settled list and the payment form were
+       * already reading. This call was the one place still reaching for the
+       * other one. */
+      currency: claim.payCcy || orgCurrency(),
       approved: (claim.approved / 100).toFixed(2),
       paid: ((detail.paid ?? 0) / 100).toFixed(2),
       outstanding: ((detail.outstanding ?? 0) / 100).toFixed(2),
