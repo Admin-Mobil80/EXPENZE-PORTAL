@@ -1531,7 +1531,13 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
         <button class="btn refresh" type="button" id="refresh" title="Load the latest from the server">
           <span class="spin" aria-hidden="true">&#8635;</span><span id="refresh-when">just now</span>
         </button>
-        <a href="/login.html" class="btn back" style="text-decoration:none">Sign out</a>
+        <!-- A button, not a link.
+             As an anchor this navigated to the sign-in page and did nothing
+             else: the token stayed in sessionStorage and app.html stayed in
+             history, so the browser's back button came back to a live
+             console - signed in, with real data, for whoever was sitting
+             there next. It did not sign anybody out; it changed the view. -->
+        <button type="button" class="btn back" id="signout">Sign out</button>
       </div>
       <div class="modesw" id="modesw" hidden></div>
     </div>
@@ -11990,6 +11996,45 @@ function sessionOver() {
   location.replace("/login.html?expired=1");
 }
 
+/* Ending a session, deliberately.
+ *
+ * The token goes first and the navigation `replace`s rather than pushes, so
+ * the console is not left in history for the back button to return to. Both
+ * halves matter: clearing the token without replacing leaves a page that
+ * reloads into the sign-in redirect - which works, and flashes the console's
+ * chrome on the way - and replacing without clearing leaves a live session
+ * one keystroke away.
+ */
+$("signout").addEventListener("click", () => {
+  try { sessionStorage.removeItem("expenze_token"); } catch (_) {}
+  location.replace("/login.html?bye=1");
+});
+
+/* And the same check when a page comes back from the browser's cache.
+ *
+ * A page restored from the back-forward cache does not re-run its script, so
+ * the guard at the foot of this file never fires - the console reappears
+ * exactly as it was left, rendered, with somebody else's figures on it. The
+ * session may be long gone; the pixels are not.
+ *
+ * `persisted` is the restore case; the token check covers every other way
+ * back to a page whose session has since ended.
+ */
+let leaving = false;
+function requireSession() {
+  if (sessionToken()) return true;
+  // Once. The boot guard and `pageshow` both ask, and two `replace` calls to
+  // one URL is the kind of thing that works until it does not.
+  if (!leaving) { leaving = true; location.replace("/login.html"); }
+  return false;
+}
+
+window.addEventListener("pageshow", (e) => {
+  if (!requireSession()) return;
+  // A restored page is showing figures from whenever it was last open.
+  if (e.persisted) refreshNow();
+});
+
 async function authCall(path, body) {
   const token = sessionToken();
   if (!token) return { ok: false, data: { error: "Sign in with a code first — the role switcher has no session." } };
@@ -12788,12 +12833,11 @@ setInterval(paintRefreshedAt, 30 * 1000);
 checkBuild();
 setInterval(checkBuild, 2 * 60 * 1000);
 
-if (!sessionToken()) {
-  // Nothing here is readable without a session, and a console rendered for
-  // nobody is worse than a sign-in page: it shows empty panels that look like
-  // a fault rather than a prompt.
-  location.replace("/login.html");
-} else {
+// Nothing here is readable without a session, and a console rendered for
+// nobody is worse than a sign-in page: it shows empty panels that look like a
+// fault rather than a prompt. `requireSession` also runs on every `pageshow`,
+// which is the one the back button reaches.
+if (requireSession()) {
   renderAll();
   loadChannels();
 }

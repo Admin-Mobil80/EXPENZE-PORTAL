@@ -328,5 +328,17 @@ const ONWARD = () => "/app.html";
   boxes[0].focus();
 })();
 </script>
+<script>
+/* Arriving here means no session.
+ *
+ * Signing out clears the token, but this page is also reached by an expired
+ * session, by the back button, and by somebody typing the address - and in
+ * each of those a token left in sessionStorage is a console one navigation
+ * away. Clearing it here makes the sign-in page mean what it looks like it
+ * means, whatever brought somebody to it.
+ */
+try { sessionStorage.removeItem("expenze_token"); } catch (_) {}
+</script>
+
 </body>
 </html>
