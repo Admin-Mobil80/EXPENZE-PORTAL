@@ -1389,6 +1389,59 @@ tr.settled td { opacity:.62; }
 footer.note { font-size:.78rem; color:var(--muted); max-width:84ch; line-height:1.55; }
 footer.note strong { color:var(--ink-2); font-weight:600; }
 @media (prefers-reduced-motion: reduce){ *{transition:none!important;animation:none!important;} }
+
+/* ---------- what a printed bill looks like ----------
+
+   The sheet is hidden on screen and everything else is hidden on paper, which
+   is the whole trick: the receipt prints from the page it is already on, so
+   the presigned URL that fetched it never leaves this document. Printing from
+   a window opened at that URL would put it in an address bar, which is the
+   thing `openLightbox` exists to avoid.
+
+   One bill per sheet. Finance files these against invoices, so two receipts
+   sharing a page is two documents to cut apart. */
+#printsheet { display:none; }
+
+@media print {
+  /* Everything the console draws, gone. `display`, not `visibility`: the
+     latter leaves the space behind and prints twenty blank pages before the
+     first receipt. */
+  body > * { display:none !important; }
+  body > #printsheet { display:block !important; }
+
+  @page { margin:14mm; }
+
+  #printsheet .bill { break-after:page; page-break-after:always; }
+  #printsheet .bill:last-child { break-after:auto; page-break-after:auto; }
+
+  /* The header is what makes a printed receipt filable: which claim it is,
+     whose it is, what it came to. A bare photograph of a bill in a folder is
+     a bill, not a claim. */
+  #printsheet .billhead { font-family:"IBM Plex Mono",monospace; font-size:9pt;
+    line-height:1.6; border-bottom:1pt solid #000; padding-bottom:5pt;
+    margin-bottom:9pt; overflow:hidden; }
+  #printsheet .billhead b { font-size:11pt; }
+  #printsheet .billhead i { font-style:normal; display:block; }
+  /* The facts that identify the claim, spaced apart. Without this they run
+     into one another as a single unreadable string - "Mobil80-Exp-48Rehaan
+     R2 SeptSoftware subscriptions" - which is the line somebody has to read
+     to file the page. */
+  #printsheet .billhead > span:not(.figs) { display:inline-block;
+    margin-right:16pt; }
+  #printsheet .billhead .figs { float:right; text-align:right; margin:0;
+    font-variant-numeric:tabular-nums; }
+
+  /* Scaled to the paper rather than printed at whatever size it was
+     photographed at. `max-height` matters as much as width: a tall receipt
+     printed at full width runs onto a second sheet, and the next bill's
+     header lands under the tail of this one. */
+  #printsheet img { display:block; max-width:100%; max-height:238mm;
+    margin:0 auto; }
+  #printsheet .page + .page { break-before:page; page-break-before:always; }
+
+  #printsheet .billnote { font-family:"IBM Plex Mono",monospace; font-size:9pt;
+    padding:10pt 0; }
+}
 </style>
 </head>
 <body>
@@ -1664,7 +1717,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
                target="_blank", which put a self-authorising URL in the address
                bar, in browser history, and one copy away from anybody. It
                opens the receipt over this page instead, where it zooms. -->
-          <span class="rmeta"><span id="r-size"></span><button type="button" class="rlink" id="r-open" hidden>Zoom in</button></span>
+          <span class="rmeta"><span id="r-size"></span><button type="button" class="rlink" id="r-print" hidden>Print</button><button type="button" class="rlink" id="r-open" hidden>Zoom in</button></span>
         </div>
         <div class="original" id="original"></div>
         <div class="thermal" id="thermal" hidden></div>
@@ -1919,7 +1972,10 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
     </section>
 
     <section class="panel">
-      <header><h2>Cleared &mdash; awaiting reimbursement</h2><span class="sub" id="pay-sub"></span></header>
+      <!-- Finance files a printed copy of every bill they pay, and the only
+           way to get one was to open each claim in turn. Twenty-two claims is
+           twenty-two round trips to print twenty-two pages. -->
+      <header><h2>Cleared &mdash; awaiting reimbursement</h2><span class="sub" id="pay-sub"></span><button class="btn" type="button" id="pay-print">Print all bills</button></header>
       <div class="banner" id="pay-banner"></div>
       <!-- Foreign claims that could not be converted. Not payable, and not
            zero - saying so is the only way they are not simply missing. -->
@@ -7124,6 +7180,223 @@ function analysed() {
   });
 }
 
+
+/* ---------- printing a bill ----------
+
+   Finance files a printed copy of every receipt they pay against. Until this
+   existed the only route was to open a claim, open the receipt over the page,
+   and use the browser's own print - which prints the console around it - or to
+   put the presigned URL in a window, which is the thing this console has gone
+   out of its way never to do.
+
+   Everything prints from this page. The sheet below is hidden on screen and is
+   the only thing visible on paper, so a receipt reaches the printer without
+   its URL ever reaching an address bar, a history entry or a clipboard.
+
+   Both kinds of receipt end up as an image, deliberately. Images are what a
+   browser prints reliably; a cross-origin PDF in an iframe prints blank, and a
+   blob iframe prints the PDF *instead of* the sheet - fine for one bill and
+   impossible for twenty-two. So a PDF is rendered to a canvas per page and the
+   sheet is uniform: one code path and one appearance, whether it is one bill
+   or the whole payment run.
+*/
+
+// Pinned, and checked against its hash on arrival. The only script this
+// console loads from anywhere, and it loads on the first print rather than on
+// every page view - nobody who never prints pays for it.
+const PDFJS = {
+  lib: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
+  libHash: "sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e",
+  worker: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
+  workerHash: "sha384-SnzOobpRMLXZ52iJvZm/C0fYw0OQemTXzTjIsdsfMcrCtCEe9qgzxTd3RSklO5x2",
+};
+let pdfjsReady = null;
+
+/** Fetch one pinned file and refuse it unless the bytes hash to what we expect.
+ *
+ * Checked here rather than with `integrity` on a script tag, for the worker's
+ * sake. A worker cannot be started from another origin - `new Worker` on a
+ * cdnjs URL is blocked - so the choice was a script tag with an integrity
+ * attribute and pdf.js falling back to its "fake worker", which renders on the
+ * main thread. That works and it is slow in exactly the case this feature
+ * exists for: a browser tab rendering twenty-two invoices with the interface
+ * frozen behind it.
+ *
+ * Fetching the bytes and checking them ourselves gives both. The blob is
+ * same-origin, so it starts as a real worker and the rendering happens off the
+ * main thread; and the check is the same SHA-384 the browser would have done,
+ * on the same bytes, before anything is run.
+ */
+async function pinnedScript(url, hash) {
+  const bytes = await (await fetch(url, { cache: "force-cache" })).arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-384", bytes);
+  let b64 = "";
+  new Uint8Array(digest).forEach(n => { b64 += String.fromCharCode(n); });
+  if ("sha384-" + btoa(b64) !== hash) {
+    throw new Error("the PDF reader did not match its pinned hash");
+  }
+  return URL.createObjectURL(new Blob([bytes], { type: "text/javascript" }));
+}
+
+function loadPdfJs() {
+  if (pdfjsReady) return pdfjsReady;
+  pdfjsReady = (async () => {
+    const [lib, worker] = await Promise.all([
+      pinnedScript(PDFJS.lib, PDFJS.libHash),
+      pinnedScript(PDFJS.worker, PDFJS.workerHash),
+    ]);
+    await new Promise((resolve, reject) => {
+      const tag = document.createElement("script");
+      tag.src = lib;
+      tag.onload = resolve;
+      tag.onerror = () => reject(new Error("the PDF reader would not load"));
+      document.head.appendChild(tag);
+    });
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = worker;
+    return window.pdfjsLib;
+  })().catch(err => { pdfjsReady = null; throw err; });
+  return pdfjsReady;
+}
+
+// About 150 DPI on A4: what a receipt needs to stay readable on paper without
+// a two-page invoice becoming forty megabytes of canvas.
+const PRINT_PAGE_PX = 1240;
+// A whole payment run is a lot of paper and a lot of memory. Past this the
+// browser is the thing that fails, so it is refused with a sentence rather
+// than attempted and lost half way.
+const PRINT_MAX_BILLS = 60;
+
+/** Every page of one receipt, as image sources ready to print. */
+async function billImages(sub) {
+  let original = sub.original;
+  if (stale(original)) original = await fetchOriginal(sub.id);
+  if (!original) return null;
+  sub.original = original;
+
+  if (original.type !== "application/pdf") return [original.url];
+
+  const pdfjs = await loadPdfJs();
+  // Fetched rather than handed to pdf.js as a URL, so the presigned link is
+  // used once, here, and never becomes a document location. The receipts
+  // bucket already allows this origin.
+  const bytes = await (await fetch(original.url)).arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: bytes }).promise;
+  const out = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    const page = await doc.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: PRINT_PAGE_PX / base.width });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    // JPEG rather than PNG: a scanned page as PNG is several megabytes, and
+    // twenty of those is a tab that stops responding mid-print.
+    out.push(canvas.toDataURL("image/jpeg", 0.88));
+  }
+  return out;
+}
+
+/** One claim's worth of paper: what it is, then the bill itself. */
+function billBlock(sub, images) {
+  const res = evaluate(sub);
+  const block = document.createElement("section");
+  block.className = "bill";
+
+  const head = document.createElement("div");
+  head.className = "billhead";
+  const paid = paidFor(sub.id);
+  const pv = sub.payoutValue;
+  const rate = pv && parseFloat(pv.rate);
+  const figs = [
+    fmt(res.receiptTotal, res.currency),
+    rate ? fmt(Math.round(res.receiptTotal * rate), pv.currency) : "",
+    paid ? `paid ${fmt(paid, orgCurrency())}` : "",
+  ].filter(Boolean);
+
+  head.innerHTML =
+    `<span class="figs">${figs.map(esc).join("<i></i>")}</span>`
+    + `<b>${esc(sub.vendor || "")}</b><i></i>`
+    + [
+        sub.reference, sub.who,
+        dayStamp(sub.receiptDate) || dayStamp(sub.date),
+        groupLabel(groupOf(sub).id),
+        (findType(sub.type) || {}).label || "",
+        sub.invoiceNumber ? `invoice ${sub.invoiceNumber}` : "",
+      ].filter(Boolean).map(t => `<span>${esc(t)}</span>`).join("");
+  block.appendChild(head);
+
+  if (!images || !images.length) {
+    const p = document.createElement("p");
+    p.className = "billnote";
+    // Printed rather than skipped. A gap in a stack of bills is something
+    // finance has to go and account for; a page naming the claim that had no
+    // file is the answer they would otherwise go looking for.
+    p.textContent = "No original is stored for this claim.";
+    block.appendChild(p);
+    return block;
+  }
+  images.forEach(src => {
+    const wrap = document.createElement("div");
+    wrap.className = "page";
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = `Receipt from ${sub.vendor || "this claim"}`;
+    wrap.appendChild(img);
+    block.appendChild(wrap);
+  });
+  return block;
+}
+
+let printing = false;
+
+/** Put these claims on paper. */
+async function printBills(subs, say) {
+  if (printing) return;
+  const sheet = $("printsheet");
+  if (!sheet || !subs.length) return;
+  if (subs.length > PRINT_MAX_BILLS) {
+    say(`That is ${subs.length} bills. Print them in smaller batches — past `
+        + `about ${PRINT_MAX_BILLS} the browser runs out of memory mid-job and `
+        + `you get half a stack with no way to tell where it stopped.`, false);
+    return;
+  }
+  printing = true;
+  renderAll();
+  let done = 0;
+  try {
+    for (const sub of subs) {
+      say(subs.length > 1
+          ? `Preparing ${++done} of ${subs.length}…`
+          : "Preparing the bill…", true);
+      let images = null;
+      try {
+        images = await billImages(sub);
+      } catch (err) {
+        // One unreadable receipt does not cost the other twenty-one. The
+        // block still prints, saying which claim it was.
+        console.warn("could not render", sub.id, err);
+      }
+      sheet.appendChild(billBlock(sub, images));
+    }
+    // Every image decoded before the dialog opens, or the browser prints the
+    // frames it happens to have and the rest come out blank.
+    await Promise.all([...sheet.querySelectorAll("img")].map(
+      img => img.decode ? img.decode().catch(() => {}) : Promise.resolve()));
+    say(subs.length > 1 ? `${subs.length} bills ready.` : "Ready.", true);
+    window.print();
+  } catch (err) {
+    say("Could not prepare the bills for printing. " + (err.message || ""), false);
+  } finally {
+    // Emptied whether the dialog was used or cancelled: the browser gives no
+    // reliable signal for either, and a sheet left full is the next print job
+    // silently doubled.
+    sheet.textContent = "";
+    printing = false;
+    renderAll();
+  }
+}
+
 /* ---------- reporting period ----------
 
    Reports answer "what did we spend", and that question is only ever asked
@@ -8171,6 +8444,10 @@ function applyReceiptTab() {
   $("original").hidden = !orig;
   $("thermal").hidden = orig;
   $("r-open").hidden = !(orig && currentOriginal);
+  // Shown on the original, not on the reading. "Print" beside a transcript
+  // would reasonably be taken to print the transcript.
+  const printBtn = $("r-print");
+  if (printBtn) printBtn.hidden = !(orig && currentOriginal);
   $("r-size").textContent = orig && currentOriginal && currentOriginal.bytes
     ? kb(currentOriginal.bytes) : "";
 }
@@ -8315,6 +8592,18 @@ function paintOriginal(sub, retried) {
    * whichever original is current through a variable that has since moved.
    * `onclick` replaces rather than stacks, so repainting cannot leave two.
    */
+  /* Print this one bill.
+   *
+   * Reassigned on every paint, for the reason the zoom control is: the button
+   * outlives the claim, and a listener added once would reach for whichever
+   * claim was open when the page loaded. */
+  const printOne = $("r-print");
+  if (printOne) {
+    printOne.onclick = () => printBills([sub], payMsg);
+    printOne.disabled = printing;
+    printOne.textContent = printing ? "Preparing\u2026" : "Print";
+  }
+
   const zoom = $("r-open");
   if (zoom) {
     const original = currentOriginal;
@@ -8580,6 +8869,30 @@ function payableClaims() {
 function renderPayments() {
   const claims = payableClaims();
   const awaiting = claims.filter(c => c.outstanding > 0);
+
+  /* Every bill in this list, in the order the list is in.
+   *
+   * The whole point of the control: finance files a printed copy against each
+   * payment, and doing that one claim at a time is twenty-two trips into a
+   * claim page and back. What is printed is what is on screen and still owed -
+   * not everything ever cleared - so the stack matches the run being paid.
+   *
+   * Hidden rather than disabled when there is nothing: a greyed button on an
+   * empty list invites somebody to work out what is wrong with it. */
+  const printAll = $("pay-print");
+  if (printAll) {
+    // `can.seeQueue()`, not `settlingHere()`: that one asks about a claim
+    // somebody has open, and on this list `aboutSomebodyElsesClaim` is false
+    // by design - so it would have hidden the button on the one screen it
+    // belongs to. Whoever can see Pending settlement can print what is in it.
+    printAll.hidden = !awaiting.length || !can.seeQueue();
+    printAll.disabled = printing;
+    printAll.textContent = printing ? "Preparing\u2026"
+      : awaiting.length === 1 ? "Print the bill" : `Print all ${awaiting.length} bills`;
+    printAll.title = "One receipt per sheet, each headed with the claim it "
+      + "belongs to.";
+    printAll.onclick = () => printBills(awaiting.map(c => c.sub), payMsg);
+  }
   const part = claims.filter(c => c.paid > 0 && c.outstanding > 0);
   const done = claims.filter(c => c.outstanding === 0);
 
@@ -11799,6 +12112,11 @@ if (!sessionToken()) {
   loadChannels();
 }
 </script>
+
+<!-- What goes to the printer, and nothing else on the page does.
+     Built on demand and emptied afterwards: holding twenty-two rendered bills
+     in the DOM between print jobs is megabytes of canvas nobody is looking at. -->
+<div id="printsheet" aria-hidden="true"></div>
 
 </body>
 </html>
