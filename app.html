@@ -5464,9 +5464,38 @@ function renderDetail() {
    * reached a person. See `saveAnswers`. */
   const saving = savingOf === sub.id;
   const deciding = decidingOf === sub.id;
-  const frozen = paid || unread || saving || deciding || !reviewingHere();
-  ["headcount", "src", "etype", "ccy", "claim-group"].forEach(id => {
+  const busy = paid || unread || saving || deciding;
+  const frozen = busy || !reviewingHere();
+
+  /* The expense type is the one control finance also holds.
+   *
+   * Everything else on this row prices the claim - the headcount, the source
+   * of the figure, the currency it is denominated in - and pricing is the
+   * reviewer's judgment about what the company owes. The type prices nothing.
+   * It says what kind of expense this is, which is a fact about the bill, and
+   * it is what every report groups by.
+   *
+   * Finance is the last person to hold the claim and the first to be asked
+   * what the month was spent on, so a claim tagged wrongly is their problem
+   * and was not theirs to correct - they had to go back to the reviewer for a
+   * dropdown. On an approved claim the amount is already fixed at
+   * `approved_total`, so re-tagging it moves it between reports and moves no
+   * money at all.
+   *
+   * The currency is deliberately not in this set. It decides what the payout
+   * converts at, so changing it after approval would change what somebody is
+   * paid - which is the reviewer's call, on a claim that has gone back to
+   * them.
+   *
+   * Two disjoint lists, each assigned exactly once. A second pass over the
+   * same control writes `false` back over the first, which is how a settled
+   * claim came to offer an editable Expense type. */
+  const classFrozen = busy || !(reviewingHere() || settlingHere());
+  ["headcount", "src", "ccy", "claim-group"].forEach(id => {
     const el = $(id); if (el) el.disabled = frozen;
+  });
+  ["etype"].forEach(id => {
+    const el = $(id); if (el) el.disabled = classFrozen;
   });
 
   // The save appears when a reviewer has actually changed something, not only
@@ -5479,9 +5508,10 @@ function renderDetail() {
   // Save button at all, while separately clearing the finding that would have
   // said one was needed. The reviewer was left with an answered-looking screen,
   // nothing to press to record it, and an Approve the server then refused.
-  const changed = !frozen
-    && (w.type !== (sub.type || "meals") || w.currency !== (res.currency || "")
-        || (("group" in w) && (w.group || "") !== (sub.groupId || "")));
+  const changed =
+    (!classFrozen && w.type !== (sub.type || "meals"))
+    || (!frozen && (w.currency !== (res.currency || "")
+                    || (("group" in w) && (w.group || "") !== (sub.groupId || ""))));
   // The panel's own copy stays hidden. It is kept in the DOM because it owns
   // the handler both routes call, and shown nowhere: the visible control sits
   // in the decision row with Approve and Reject, and two of one button made
@@ -5512,12 +5542,29 @@ function renderDetail() {
     : refused
     ? "Rejected — nothing further is needed here."
     : locked
-    // Approved and not yet paid. Editable, and worth saying what editing the
-    // two that decide money will do, since it is not what Reopen does.
-    ? "Approved. Correct anything here; a change to the type or the currency "
-      + "sends it back through the policy engine."
+    /* Approved and not yet paid, and this line promised something that had
+     * stopped being true. "A change to the type or the currency sends it back
+     * through the policy engine" described the re-check, which was taken out
+     * deliberately: a claim in front of a person is decided by that person,
+     * and nothing re-judges it afterwards. The sentence outlived the feature
+     * and went on telling reviewers a correction would do something it no
+     * longer does.
+     *
+     * Said differently to the two roles, because they hold different
+     * controls. A reviewer holds all of them; finance holds the expense type
+     * alone, and the useful thing to tell them is what changing it does and
+     * does not touch. */
+    ? (reviewingHere()
+       ? "Approved. The expense type and the currency are still correctable "
+         + "here; the claim is not re-judged and the amount does not move."
+       : "Approved. You can still correct the expense type — it decides which "
+         + "report this lands in, not what is paid.")
     : blocking && !frozen
-    ? "Fix what blocked it; the verdict recomputes against the same rules production runs."
+    // Same correction. Saving records what the agent could not work out; it
+    // does not run the policy again, so promising a fresh verdict was an offer
+    // of something that never arrives.
+    ? "Set what the agent could not work out, then approve or reject it "
+      + "yourself. Saving records the answer; it does not re-judge the claim."
     : "";
 
   const tbody = $("items"); tbody.textContent = "";
@@ -5866,6 +5913,30 @@ function renderDetail() {
         + "once they have released it."
       : "In review. You will hear the outcome by email and WhatsApp.";
     abox.appendChild(s2);
+
+    /* Somewhere for finance to put a re-tagged claim.
+     *
+     * The Save button lives in the reviewer's branch, which a finance
+     * executive never reaches - so the expense type control would have come
+     * alive under them, accepted a change, and offered nothing to record it
+     * with. That is the group bug again: a dropdown that moves and a record
+     * that does not. */
+    if (!isPristine(sub, w) && !classFrozen) {
+      const save = document.createElement("button");
+      save.className = "btn primary"; save.type = "button";
+      save.disabled = savingOf === sub.id;
+      save.textContent = savingOf === sub.id ? "Saving…" : "Save";
+      save.title = "Record the expense type on this claim. Nothing else about "
+        + "it changes, and it is not re-judged.";
+      save.addEventListener("click", saveAnswers);
+      abox.appendChild(save);
+      const note = document.createElement("span");
+      note.className = "stamp pending";
+      note.style.color = "var(--warn)";
+      note.textContent = `Expense type → ${(findType(w.type) || {}).label || w.type}`
+        + " — not saved yet.";
+      abox.appendChild(note);
+    }
   } else if (isPaid(sub)) {
     // Reimbursed. There is nothing left to decide, and offering Approve or
     // Reject over a payment somebody has already received invites an action
@@ -11145,7 +11216,19 @@ let answerMsgFor = null;
 async function saveAnswers() {
   const sub = SUBMISSIONS.find(s => s.id === selectedId);
   if (!sub || savingOf) return;
-  const chosen = $("etype").value, chosenCcy = $("ccy").value;
+  const chosen = $("etype").value;
+  /* Only the controls this reader actually holds are sent.
+   *
+   * A finance executive may correct the expense type on a claim they are
+   * about to pay and may not touch the currency, which prices it. Reading the
+   * value off a disabled control and posting it anyway would have them send a
+   * currency on every save - the same one, so nothing would change, and the
+   * server would still have to decide whether to allow a field that was never
+   * edited. Sending what was editable is the honest request.
+   *
+   * Same rule the group already followed, for the same reason. */
+  const cs = $("ccy");
+  const chosenCcy = cs && !cs.disabled ? cs.value : null;
   // "" is a real answer here - a reviewer clearing a group the agent got
   // wrong - so it is sent, and the server distinguishes absent from empty.
   const gs = $("claim-group");
@@ -11202,7 +11285,8 @@ async function saveAnswers() {
   let ok = false, data = {};
   try {
     ({ ok, data } = await authCall("/claim/retype", {
-      submission_id: sub.id, expense_type: chosen, currency: chosenCcy,
+      submission_id: sub.id, expense_type: chosen,
+      ...(chosenCcy === null ? {} : { currency: chosenCcy }),
       ...(chosenGroup === null ? {} : { group_id: chosenGroup }),
     }));
   } catch (_) {
@@ -11217,7 +11301,12 @@ async function saveAnswers() {
   if (!ok) return show(data.error || "Could not save the change.", false);
   await loadRecords();
   renderAll();
-  show(`Saved: ${label0} in ${chosenCcy}. Approve or reject it when you are ready.`,
+  show(chosenCcy
+       ? `Saved: ${label0} in ${chosenCcy}. Approve or reject it when you are ready.`
+       // Finance's version: they are not being asked to decide anything, so
+       // "approve or reject it when you are ready" is an instruction they
+       // cannot follow.
+       : `Saved: ${label0}. It is reported under that from now on.`,
        true);
 }
 
