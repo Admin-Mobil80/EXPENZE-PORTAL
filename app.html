@@ -5318,10 +5318,32 @@ function renderDetail() {
          reviewer who then approves it would be shown a payout of nothing. */
       const owed = res.reimbursable;
       const rate = parseFloat(pv.rate) || 0;
+      /* Where the rate came from, because the two answers mean different
+       * things to whoever reads this line.
+       *
+       * A market rate is ours: looked up on the day the claim arrived, and a
+       * reader who knows today's rate can reasonably ask why it differs. A
+       * rate printed on the bill is not a rate in that sense at all - it is
+       * the transaction, the amount the card was actually charged, issuer's
+       * margin included. Reporting that one as though we had looked it up
+       * invites somebody to "correct" it back to the market and quietly make
+       * the employee carry the conversion fee.
+       *
+       * So it is named, and the day is dropped: "as printed on the bill" is
+       * already the whole provenance, and a date beside it would suggest a
+       * rate that was current on one and not another. */
+      const fromBill = pv.source === "receipt";
       // One line on the header now, not a tile of its own.
       payRow.textContent = `pays out ${fmt(Math.round(owed * rate), pv.currency)}`
         + ` · ${pv.from} at ${pv.rate}`
-        + (pv.as_of ? ` · ${rateDay(pv.as_of)}` : "");
+        + (fromBill ? " · as charged on the bill"
+           : pv.as_of ? ` · ${rateDay(pv.as_of)}` : "");
+      payRow.title = fromBill
+        ? "The bill states what the card was charged, so that is what this "
+          + "pays out — the conversion fee included. No looked-up rate "
+          + "reproduces it."
+        : "Converted at the rate taken when the receipt arrived, and fixed "
+          + "there so what is owed cannot move before it is paid.";
     }
   }
 
