@@ -1352,6 +1352,12 @@ td.n .pending { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:v
 /* The reason goes to a person verbatim, so the box it is written in is a text
    box and not a one-line prompt. */
 .settle .sf.wide { max-width:46rem; }
+/* The submitter filter, in the panel header beside the count it changes. */
+.payfind { font:inherit; font-size:.8rem; padding:5px 9px; width:190px;
+  border:1px solid var(--rule-firm); border-radius:var(--radius);
+  background:var(--surface); color:var(--ink); margin-left:auto; }
+.payfind:focus-visible { outline:2px solid var(--focus); outline-offset:-1px; }
+.payfind::placeholder { color:var(--muted); }
 .paymsg { margin:0 14px 12px; padding:10px 13px; border-radius:var(--radius);
   font-size:.86rem; font-weight:500; display:flex; align-items:center; gap:9px; }
 .paymsg.ok { background:var(--ok-bg); color:var(--ok); border:1px solid var(--ok); }
@@ -1975,7 +1981,13 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <!-- Finance files a printed copy of every bill they pay, and the only
            way to get one was to open each claim in turn. Twenty-two claims is
            twenty-two round trips to print twenty-two pages. -->
-      <header><h2>Cleared &mdash; awaiting reimbursement</h2><span class="sub" id="pay-sub"></span><button class="btn" type="button" id="pay-print">Print all bills</button></header>
+      <header><h2>Cleared &mdash; awaiting reimbursement</h2><span class="sub" id="pay-sub"></span><!--
+           Finance pays a person, not a claim. Somebody with four receipts
+           waiting gets one transfer, so the list has to be able to become
+           that person's list - and then the total above it is the figure
+           that goes on the transfer. -->
+        <input type="search" id="pay-who" class="payfind" placeholder="Filter by submitter" aria-label="Filter by submitter" autocomplete="off">
+        <button class="btn" type="button" id="pay-print">Print all bills</button></header>
       <div class="banner" id="pay-banner"></div>
       <!-- Foreign claims that could not be converted. Not payable, and not
            zero - saying so is the only way they are not simply missing. -->
@@ -7349,6 +7361,18 @@ function billBlock(sub, images) {
 }
 
 let printing = false;
+/* How far through a print job we are, for the button that started it.
+ *
+ * This used to go to `payMsg`, which is the settlement confirmation line -
+ * and that line persists on purpose, because "INR 6,632.00 recorded as paid"
+ * is worth leaving on screen. A progress message is the opposite: it is true
+ * for four seconds and misleading afterwards. "14 bills ready." sat on the
+ * Pending settlement page over a list that had since become ten claims, and
+ * read as a statement about the list.
+ *
+ * The button is the right place. It is where the reader clicked, it is
+ * rebuilt on every render, and it cannot outlive the job that set it. */
+let printProgress = "";
 
 /** Put these claims on paper. */
 async function printBills(subs, say) {
@@ -7362,13 +7386,13 @@ async function printBills(subs, say) {
     return;
   }
   printing = true;
+  printProgress = "";
   renderAll();
   let done = 0;
   try {
     for (const sub of subs) {
-      say(subs.length > 1
-          ? `Preparing ${++done} of ${subs.length}…`
-          : "Preparing the bill…", true);
+      printProgress = subs.length > 1 ? `${++done} of ${subs.length}` : "";
+      renderAll();
       let images = null;
       try {
         images = await billImages(sub);
@@ -7383,7 +7407,8 @@ async function printBills(subs, say) {
     // frames it happens to have and the rest come out blank.
     await Promise.all([...sheet.querySelectorAll("img")].map(
       img => img.decode ? img.decode().catch(() => {}) : Promise.resolve()));
-    say(subs.length > 1 ? `${subs.length} bills ready.` : "Ready.", true);
+    // No "ready" message. The print dialog opening is the confirmation, and
+    // anything left behind here is a sentence about a job that has finished.
     window.print();
   } catch (err) {
     say("Could not prepare the bills for printing. " + (err.message || ""), false);
@@ -7393,6 +7418,7 @@ async function printBills(subs, say) {
     // silently doubled.
     sheet.textContent = "";
     printing = false;
+    printProgress = "";
     renderAll();
   }
 }
@@ -8617,6 +8643,16 @@ function paintOriginal(sub, retried) {
   applyReceiptTab();
 }
 
+/* Re-rendered as they type, and the value is read back off the control rather
+ * than kept in a variable: the whole payments view is rebuilt on every render,
+ * but this input is markup that survives it, so the DOM is already where the
+ * answer lives. Keeping a second copy is how the two come to disagree. */
+$("pay-who").addEventListener("input", () => renderPayments());
+// Escape clears it, which is what a search box does everywhere else.
+$("pay-who").addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.target.value) { e.target.value = ""; renderPayments(); }
+});
+
 $("rtab-orig").addEventListener("click", () => { receiptTab = "orig"; applyReceiptTab(); });
 $("rtab-text").addEventListener("click", () => { receiptTab = "text"; applyReceiptTab(); });
 
@@ -8868,7 +8904,26 @@ function payableClaims() {
 
 function renderPayments() {
   const claims = payableClaims();
-  const awaiting = claims.filter(c => c.outstanding > 0);
+  /* One narrowing, above everything that reads the list.
+   *
+   * Finance settles a person rather than a claim: somebody with four receipts
+   * waiting is owed one transfer, and what they need on screen is that
+   * person's claims, that person's total, and that person's bills to print.
+   * Filtering only the rows would have left the Outstanding tile, the count
+   * beside the heading and the print button all describing everybody - three
+   * figures disagreeing with the list under them, which is the shape of bug
+   * this console has been bitten by twice.
+   */
+  const whoBox = $("pay-who");
+  const findWho = (whoBox ? whoBox.value : "").trim().toLowerCase();
+  const matchesWho = (c) => !findWho
+    || String(c.sub.who || "").toLowerCase().includes(findWho)
+    || String(c.sub.whoEmail || "").toLowerCase().includes(findWho);
+
+  const awaiting = claims.filter(c => c.outstanding > 0 && matchesWho(c));
+  // Counted before the filter, so "3 of 10" can be said rather than the other
+  // seven quietly ceasing to exist.
+  const awaitingAll = claims.filter(c => c.outstanding > 0);
 
   /* Every bill in this list, in the order the list is in.
    *
@@ -8887,7 +8942,8 @@ function renderPayments() {
     // belongs to. Whoever can see Pending settlement can print what is in it.
     printAll.hidden = !awaiting.length || !can.seeQueue();
     printAll.disabled = printing;
-    printAll.textContent = printing ? "Preparing\u2026"
+    printAll.textContent = printing
+      ? `Preparing${printProgress ? " " + printProgress : ""}\u2026`
       : awaiting.length === 1 ? "Print the bill" : `Print all ${awaiting.length} bills`;
     printAll.title = "One receipt per sheet, each headed with the claim it "
       + "belongs to.";
@@ -8935,7 +8991,9 @@ function renderPayments() {
   $("pay-banner").innerHTML = rw
     ? `<strong>Paying as ${currentUser.name}.</strong><span>Settling records the payment against the claim; it does not move money on its own. Mode and reference are optional, and every entry is stamped with who paid it.</span>`
     : `<strong>Read-only.</strong><span>Reimbursement is a Finance Executive action.</span>`;
-  $("pay-sub").textContent = awaiting.length
+  $("pay-sub").textContent = findWho
+    ? `${awaiting.length} of ${awaitingAll.length} claims`
+    : awaiting.length
     ? awaiting.length + (awaiting.length === 1 ? " claim" : " claims") : "clear";
 
   const tb = $("paylist"); tb.textContent = "";
@@ -8945,7 +9003,12 @@ function renderPayments() {
     // paid - an empty row that spans the wrong number sits under the wrong
     // columns.
     tr.innerHTML = `<td colspan="${anyPartPaid ? 9 : 7}" class="empty">`
-      + "Nothing awaiting reimbursement. Cleared claims land here until they are paid.</td>";
+      + (findWho
+         ? `Nobody matching &ldquo;${esc(findWho)}&rdquo; is owed anything. `
+           + `${awaitingAll.length} claim${awaitingAll.length === 1 ? " is" : "s are"} `
+           + "waiting under other names."
+         : "Nothing awaiting reimbursement. Cleared claims land here until they are paid.")
+      + "</td>";
     tb.appendChild(tr);
   }
   // Only what is still owed. Paid claims move to the Settled tab.
