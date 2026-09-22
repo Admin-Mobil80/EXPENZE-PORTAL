@@ -2647,7 +2647,7 @@ function evaluatePolicy(currency, lineItems, expenseType, statedTotal) {
 
   if (!rule) {
     violations.push({ code:"no_rule_for_expense_type", blocking:true, amount:null,
-      msg:`No enabled rule covers "${expenseType}". A reviewer must decide, or an administrator must add a rule.` });
+      msg:`No enabled rule covers "${expenseType}". A reviewer can approve it anyway; it cannot be paid until somebody sets a type the policy covers, or an administrator adds a rule for this one.` });
     rule = { id:expenseType, label:expenseType, caps:{} };
   }
 
@@ -5011,14 +5011,10 @@ function approveBlocker(sub) {
   if (res.violations.some(v => v.code === "nothing_read")) {
     return "Nothing was read off this receipt, so there is no amount to approve.";
   }
-  if (!rules.types.some(t => t.enabled && t.id === sub.type)) {
-    return "No expense type is set. Open it and set one — every claim is "
-         + "reported under one.";
-  }
-  if ((ORG_PROFILE.groups || []).length && !sub.groupId) {
-    return "No cost centre is set. Open it and set a group — there is no "
-         + "budget it could be paid from.";
-  }
+  // Not the expense type or the cost centre. Neither stops an approval any
+  // more - they stop a *payment*, which is finance's screen and finance's
+  // problem to clear. Blocking the box on them made bulk approve useless on
+  // the only queue that needed it: eighteen of twenty claims missing one.
   return "";
 }
 
@@ -6043,7 +6039,8 @@ function renderDetail() {
     const code = document.createElement("code"); code.textContent = "group_not_set";
     const msg = document.createElement("span"); msg.className = "msg";
     msg.textContent = "No cost centre is set on this claim, and the bill does "
-      + "not say which. Set the group above before approving it.";
+      + "not say which. It can be approved without one; it cannot be paid "
+      + "without one.";
     row.append(code, msg); vbox.appendChild(row);
   }
 
@@ -6440,7 +6437,24 @@ function renderDetail() {
      * Reject is the honest button, and the other way out is off this screen
      * entirely - a clearer photograph, submitted again. */
     const unreadable = res.violations.some(v => v.code === "nothing_read");
-    const choices = (!typeOk || unsaved || needsGroup || unreadable)
+    /* Approve waits for an unsaved edit and for a receipt nobody could read.
+     * It does not wait for the expense type or the cost centre.
+     *
+     * It used to wait for both, and that put the requirement in the wrong
+     * place. Approving is a judgment about whether the company owes this
+     * money; the type and the group are about how the payment is filed, and
+     * filing is finance's job. A reviewer who had read the bill and decided
+     * it was legitimate was being stopped by two dropdowns that say nothing
+     * about that decision - on a queue where eighteen of twenty claims were
+     * missing one of them.
+     *
+     * The requirement moved rather than went: a settlement is refused
+     * without both, so nothing can be paid, and therefore nothing reported,
+     * under a missing type or an unnamed cost centre. `unsaved` and
+     * `unreadable` stay, because neither is about filing - one is an edit
+     * that has not reached the server, the other is a claim with no amount
+     * in it to approve. */
+    const choices = (unsaved || unreadable)
       ? [["Reject","danger","Rejected"]]
       : [["Approve as reviewed","primary","Approved"],
          ["Reject","danger","Rejected"]];
@@ -6505,20 +6519,21 @@ function renderDetail() {
       // type is not the thing standing in the way.
       ? "Nothing was read off this receipt, so there is no amount to approve. "
         + "Reject it and ask for a clearer photograph of the same bill."
-      : !typeOk
-      // Said as the requirement it is, rather than as a finding. Nothing is
-      // wrong with the claim; it simply cannot be reported on until somebody
-      // says what kind of expense it is.
-      ? "Set an expense type above. Every claim is reported under one, so this "
-        + "cannot be approved without it — rejecting it needs nothing."
-      : needsGroup
-      // The same courtesy for the other thing that withholds Approve. It is
-      // in the findings above too, but a reviewer looking at a row of buttons
-      // and wondering where Approve went is looking here.
-      ? "Set a group above. The payment comes out of a cost centre, so this "
-        + "cannot be approved without one — rejecting it needs nothing."
+      // Said as what is still outstanding rather than as something stopping
+      // the decision, because it no longer stops it. Finance cannot pay a
+      // claim missing either, so saying so here saves them coming back - but
+      // a reviewer who knows the bill is good can approve it and move on.
+      : (!typeOk || needsGroup)
+      ? (!typeOk && needsGroup
+         ? "No expense type and no cost centre yet. You can still approve it; "
+           + "finance cannot pay it until both are set."
+         : !typeOk
+         ? "No expense type yet. You can still approve it; finance cannot pay "
+           + "it until one is set."
+         : "No cost centre yet. You can still approve it; finance cannot pay "
+           + "it until one is set.")
       : `Deciding as ${currentUser.name} · ${currentUser.role}`;
-    if (!typeOk || unsaved || needsGroup || unreadable) s.style.color = "var(--warn)";
+    if (unsaved || unreadable || !typeOk || needsGroup) s.style.color = "var(--warn)";
     abox.appendChild(s);
     // Not blocked - a sole owner with nobody else to ask would never be paid -
     // but said out loud. The claim records who decided it, and "the same
