@@ -1204,6 +1204,12 @@ tr.opens:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
 .stamp.done { color:var(--ok); }
 /* And a refusal in the colour a refusal is everywhere else on this page. */
 .stamp.bad { color:var(--bad); }
+/* The refresh button, when the last attempt did not reach the server.
+   `.stale` is taken and means something else on this same button - a newer
+   version of the console has shipped - so this gets a name of its own rather
+   than two meanings fighting over one class. That has happened here before. */
+.btn.refresh.offline { color:var(--bad); border-color:var(--bad);
+  background:var(--bad-bg); }
 /* The bar itself, so the line is not red on a green ground. */
 .actions.refused { background:var(--bad-bg); border-color:var(--bad); }
 .stage-by { font-family:"IBM Plex Mono",monospace; font-size:.65rem; color:var(--muted);
@@ -1382,6 +1388,12 @@ td.n .pending { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:v
 .batchform .bfields .sf { display:flex; flex-direction:column; gap:4px; }
 .batchform .bfields .sf.wide { flex:1; min-width:200px; }
 .batchform .bgo { display:flex; gap:11px; align-items:center; flex-wrap:wrap; }
+
+/* The select column. Narrow, and the box centred in it rather than sitting
+   against the left edge of a cell sized for a date. */
+th.pick, td.pick { width:34px; padding-left:14px; padding-right:0; }
+td.pick input, th.pick input { cursor:pointer; margin:0; }
+td.pick input:disabled { cursor:not-allowed; opacity:.35; }
 
 /* The submitter filter, in the panel header beside the count it changes. */
 .payfind { font:inherit; font-size:.8rem; padding:5px 9px; width:190px;
@@ -1626,7 +1638,12 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
          place a claim is read and decided rather than two. -->
     <div id="split-queue">
       <section class="panel" id="queue-list">
-        <header><h2>Review queue</h2><span class="sub" id="queue-count"></span></header>
+        <header><h2>Review queue</h2><span class="sub" id="queue-count"></span><!--
+             Nineteen small receipts from one person is one piece of work, not
+             nineteen. The filter makes the queue that person's, and the
+             checkboxes let a reviewer say yes to what they have read. -->
+          <input type="search" id="q-who" class="payfind" placeholder="Filter by submitter" aria-label="Filter by submitter" autocomplete="off">
+          <button class="btn primary" type="button" id="q-approve" hidden>Approve selected</button></header>
         <!-- Shown to a finance executive, who can read this list and open
              anything on it but decides none of it. Reviewing and paying are
              two jobs; the whole value of separating them is lost if the
@@ -3276,6 +3293,9 @@ async function loadRecords() {
 
 let loadedAt = 0;
 let refreshing = false;
+// Whether the last attempt to reach the server failed. Said on the button,
+// because a list that has stopped updating looks exactly like a quiet one.
+let loadFailed = false;
 
 /** Views where a reload cannot throw away something somebody typed.
  *
@@ -3308,7 +3328,18 @@ function sinceLabel(ms) {
 
 function paintRefreshedAt() {
   const el = $("refresh-when");
-  if (el) el.textContent = refreshing ? "loading…" : sinceLabel(loadedAt);
+  if (el) {
+    el.textContent = refreshing ? "loading…"
+      : loadFailed ? "not up to date" : sinceLabel(loadedAt);
+    // A stale list that says "2m ago" is worse than one that says nothing:
+    // somebody settles four claims out of six and never learns there were six.
+    const btn = el.closest("button") || el;
+    btn.classList.toggle("offline", !refreshing && loadFailed);
+    btn.title = loadFailed
+      ? "The last refresh did not reach the server, so this may be out of "
+        + "date. Click to try again."
+      : "Load the latest from the server";
+  }
   const btn = $("refresh");
   // Old enough to be worth pointing at. Below this it is furniture.
   if (btn) btn.classList.toggle("stale", !refreshing && loadedAt > 0
@@ -3432,10 +3463,32 @@ async function refreshNow() {
   if (refreshing || !sessionToken()) return;
   refreshing = true;
   paintRefreshedAt();
-  // `loadRecords` ends in `renderAll()`, so the screen follows the data.
-  await Promise.all([loadChannels(), loadRecords(), checkBuild()]);
-  refreshing = false;
-  paintRefreshedAt();
+  try {
+    // `loadRecords` ends in `renderAll()`, so the screen follows the data.
+    await Promise.all([loadChannels(), loadRecords(), checkBuild()]);
+    loadFailed = false;
+  } catch (err) {
+    /* One failed refresh must not be the last one.
+     *
+     * Without this, any rejection in there - a dropped connection, a request
+     * that timed out, a token that expired mid-flight - left `refreshing`
+     * true for the life of the page. The button read "loading…" for ever,
+     * and because the first line of this function returns early while it is
+     * set, nothing refreshed again: not the poll, not the click, not the
+     * return to the tab.
+     *
+     * The page went on working perfectly against data that had stopped
+     * arriving. Madhusudhan settled three claims from a list of four while
+     * six were waiting, and the two he could not see were the two approved
+     * after his last successful load. Nothing on screen said so; the figures
+     * were internally consistent and quietly out of date.
+     */
+    loadFailed = true;
+    console.warn("refresh failed", err);
+  } finally {
+    refreshing = false;
+    paintRefreshedAt();
+  }
 }
 
 /** The policy as the API stores it, in the shape this page edits.
@@ -4912,9 +4965,141 @@ const rejectedClaims = () =>
  * Pending asks what is blocked and what it is worth. Rejected asks who
  * refused it and in what words - the reason is the whole point of keeping
  * the list, because it is what the submitter was told. */
+
+/* ---------- approving several claims at once ----------
+
+   Nineteen small receipts from one person is one piece of work, not nineteen,
+   and opening nineteen pages to say yes to each is how a queue stops getting
+   worked. This is a convenience and not a shortcut: every claim ticked here
+   goes through exactly the checks it would have faced on its own page, and the
+   server applies them again rather than trusting the tick.
+
+   What it deliberately does not do is let somebody approve what they could not
+   have approved individually. A claim with no expense type the policy covers,
+   or no cost centre where the organisation runs them, is not selectable - and
+   the box says why rather than leaving a reviewer to wonder why the count will
+   not go up. */
+
+// Which claims are ticked. Cleared when they leave the list, so nobody
+// approves something they cannot see.
+const picked = new Set();
+
+/** What the submitter box is narrowing to, or "" for everybody. */
+function queueFind() {
+  const box = $("q-who");
+  return (box ? box.value : "").trim().toLowerCase();
+}
+
+/** The claims the queue is currently showing.
+ *
+ * The one place the submitter filter is applied. `renderQueue` paints from
+ * this, the tiles above it are painted from what it returns, and the select
+ * boxes and the Approve button read it - so a claim cannot be selectable
+ * while being invisible, and the count above the list cannot describe a
+ * different set from the rows under it. */
+function queueRows() {
+  const find = queueFind();
+  return SUBMISSIONS.filter(isQueued).filter(sub => !find
+    || String(sub.who || "").toLowerCase().includes(find)
+    || String(sub.whoEmail || "").toLowerCase().includes(find));
+}
+
+/** Why this claim cannot be approved from the list. "" when it can. */
+function approveBlocker(sub) {
+  if (!can.review()) return "Deciding a claim is an owner's or an administrator's.";
+  const res = evaluate(sub);
+  if (res.violations.some(v => v.code === "nothing_read")) {
+    return "Nothing was read off this receipt, so there is no amount to approve.";
+  }
+  if (!rules.types.some(t => t.enabled && t.id === sub.type)) {
+    return "No expense type is set. Open it and set one — every claim is "
+         + "reported under one.";
+  }
+  if ((ORG_PROFILE.groups || []).length && !sub.groupId) {
+    return "No cost centre is set. Open it and set a group — there is no "
+         + "budget it could be paid from.";
+  }
+  return "";
+}
+
+const canApproveNow = (sub) => !approveBlocker(sub);
+
+/** The button, saying what it will do and to how many. */
+function paintApproveButton() {
+  const btn = $("q-approve");
+  if (!btn) return;
+  const chosen = queueRows().filter(sub => picked.has(sub.id));
+  btn.hidden = !can.review() || !chosen.length;
+  btn.disabled = approving;
+  const total = chosen.reduce((t, sub) => {
+    const res = evaluate(sub);
+    const pv = sub.payoutValue, rate = pv && parseFloat(pv.rate);
+    return t + (rate ? Math.round(res.receiptTotal * rate) : res.receiptTotal);
+  }, 0);
+  // The figure as well as the count. "Approve 12" is a number of rows;
+  // what a reviewer is releasing is money.
+  btn.textContent = approving
+    ? "Approving…"
+    : `Approve ${chosen.length} · ${fmt(total, orgCurrency())}`;
+  btn.title = "Each one is checked again on the server, exactly as it would "
+    + "be on its own page.";
+}
+
+let approving = false;
+
+/** Approve everything ticked, having asked once. */
+async function approvePicked() {
+  if (approving) return;
+  const chosen = queueRows().filter(sub => picked.has(sub.id));
+  if (!chosen.length) return;
+
+  /* Asked once, and the question names what it is about.
+   *
+   * This is the one control in the product that decides money for more than
+   * one claim at a time. A reviewer who has read twelve receipts should not
+   * be stopped twelve times; a reviewer who has ticked twelve by accident
+   * should be stopped once. */
+  const who = [...new Set(chosen.map(s => s.who))];
+  const total = chosen.reduce((t, sub) => {
+    const res = evaluate(sub);
+    const pv = sub.payoutValue, rate = pv && parseFloat(pv.rate);
+    return t + (rate ? Math.round(res.receiptTotal * rate) : res.receiptTotal);
+  }, 0);
+  if (!window.confirm(
+      `Approve ${chosen.length} claims totalling ${fmt(total, orgCurrency())}?\n\n`
+      + (who.length === 1 ? `All ${who[0]}'s.` : `Across ${who.length} people.`)
+      + "\n\nThey move to Pending settlement and each submitter is told.")) return;
+
+  approving = true;
+  paintApproveButton();
+  let ok = false, data = {};
+  try {
+    ({ ok, data } = await authCall("/claim/review-batch", {
+      submission_ids: chosen.map(s => s.id),
+    }));
+  } catch (_) {
+    data = { error: "Network error — nothing was recorded." };
+  }
+  approving = false;
+
+  if (!ok) {
+    // The server names the claim that stopped it, which is the useful half:
+    // the reviewer opens that one rather than guessing which of twelve.
+    say(data.error || "Could not approve those claims.", false);
+    paintApproveButton();
+    return;
+  }
+  picked.clear();
+  await loadRecords();
+  renderAll();
+  const sent = Object.entries(data.sent || {}).filter(([, v]) => v).map(([k]) => k);
+  say(`${data.count} claims approved and moved to Pending settlement.`
+      + (sent.length ? ` Submitters told by ${sent.join(" and ")}.` : ""), true);
+}
+
 const QUEUE_COLUMNS = {
-  pending: ["Submitted", "Receipt date", "Submitter", "Vendor", "Group",
-            ["Claimed", "right"]],
+  pending: [["", "pick"], "Submitted", "Receipt date", "Submitter", "Vendor",
+            "Group", ["Claimed", "right"]],
   rejected: ["Rejected", "Submitter", "Vendor", "Rejected by", "Reason",
              ["Claimed", "right"]],
 };
@@ -4928,6 +5113,27 @@ function paintQueueHead() {
     const th = document.createElement("th");
     th.scope = "col"; th.textContent = label;
     if (align === "right") th.style.textAlign = "right";
+    /* Select-all, over the column it selects.
+     *
+     * It ticks what can actually be approved and nothing else, so on a queue
+     * where most claims are missing a cost centre it selects the handful that
+     * are ready rather than appearing to select everything and then refusing.
+     */
+    if (align === "pick") {
+      th.className = "pick";
+      if (can.review()) {
+        const all = document.createElement("input");
+        all.type = "checkbox"; all.id = "q-all";
+        all.title = "Select every claim below that is ready to approve";
+        all.addEventListener("change", () => {
+          const ready = queueRows().filter(canApproveNow);
+          if (all.checked) ready.forEach(sub => picked.add(sub.id));
+          else ready.forEach(sub => picked.delete(sub.id));
+          renderQueue();
+        });
+        th.appendChild(all);
+      }
+    }
     head.appendChild(th);
   });
 }
@@ -4970,9 +5176,26 @@ function renderQueue() {
   if (queueTab === "rejected") return renderQueueRejected();
 
   const box = $("queue"); box.textContent = "";
-  const queue = SUBMISSIONS.filter(isQueued);
-  $("queue-count").textContent = queue.length === 0 ? "clear" : queue.length + " waiting";
+  const all0 = SUBMISSIONS.filter(isQueued);
+  /* Narrowed once, above the tiles as well as the list.
+   *
+   * Same rule as Pending settlement: three figures describing everybody over
+   * a list showing one person is the shape of bug this console has been
+   * bitten by twice. When a filter is on the heading says "12 of 19" rather
+   * than redefining what nineteen means.
+   */
+  const findWho = queueFind();
+  const queue = queueRows();
+
+  $("queue-count").textContent = findWho
+    ? `${queue.length} of ${all0.length} waiting`
+    : queue.length === 0 ? "clear" : queue.length + " waiting";
   paintQueueTiles(queue);
+
+  // A claim that has scrolled out of the filter is no longer on screen, and a
+  // selection somebody cannot see is one they cannot check before approving.
+  const visible = new Set(queue.map(sub => sub.id));
+  [...picked].forEach(id => { if (!visible.has(id)) picked.delete(id); });
 
   /* This screen owns what it shows.
    *
@@ -5074,7 +5297,24 @@ function renderQueue() {
     const billed = dayStamp(sub.receiptDate);
 
     opensClaim(tr, sub.id);
+    /* The checkbox, and why it is sometimes dead.
+     *
+     * Only a claim that could be approved on its own page can be approved
+     * from here - same expense type against the same policy, same cost centre
+     * requirement. A tickable box on a claim the server would refuse is a
+     * button that lies, and on this queue most of them are missing a group,
+     * so the disabled ones carry the reason rather than leaving somebody to
+     * work out why the count never goes up.
+     */
+    const ready = canApproveNow(sub);
     tr.innerHTML =
+      `<td class="pick">` + (can.review()
+        ? `<input type="checkbox" data-pick="${esc(sub.id)}"`
+          + (ready ? "" : " disabled")
+          + (picked.has(sub.id) ? " checked" : "")
+          + ` title="${esc(ready ? "Approve this one with the others"
+                                 : approveBlocker(sub))}">`
+        : "") + `</td>` +
       `<td class="day">${esc(dayStamp(sub.date))}</td>` +
       `<td class="day">${billed ? esc(billed)
                                 : '<span class="undated">not printed</span>'}</td>` +
@@ -5088,6 +5328,24 @@ function renderQueue() {
     box.appendChild(tr);
   });
   totalRow(box, queue, QUEUE_COLUMNS.pending.length);
+
+  // Delegated to the table, because the rows are rebuilt on every render and
+  // a listener per row would be re-added with them.
+  box.querySelectorAll("input[data-pick]").forEach(cb => {
+    cb.addEventListener("click", (e) => {
+      e.stopPropagation();                 // the row itself opens the claim
+      if (cb.checked) picked.add(cb.dataset.pick);
+      else picked.delete(cb.dataset.pick);
+      paintApproveButton();
+    });
+  });
+  const all = $("q-all");
+  if (all) {
+    const ready = queue.filter(canApproveNow);
+    all.disabled = !ready.length;
+    all.checked = !!ready.length && ready.every(sub => picked.has(sub.id));
+  }
+  paintApproveButton();
   wireClaimRows(box);
 }
 
@@ -5839,8 +6097,20 @@ function renderDetail() {
   // Your own claim, yours to take back - until the money has moved, at which
   // point withdrawing it would leave a payment recorded against a claim that
   // says it was never made.
-  if (!saving && isMine(sub) && !mayReview && !isPaid(sub)
-      && !(decision && decision.action === "Withdrawn")) {
+  /* Withdraw, until somebody has decided it.
+   *
+   * The guard named one ending and not the others, so a claim that had been
+   * *rejected* still offered Withdraw to the person who sent it - and taking
+   * back something that has already been refused is not a thing that can
+   * happen. It rewrites a decision somebody made, under their name, with no
+   * record of the rejection it replaced.
+   *
+   * `isClosed` is the rule the rest of this console already uses for "nobody
+   * is waiting on this any more": settled, rejected, withdrawn. Naming it
+   * here rather than listing the endings again is what stops the next ending
+   * being forgotten.
+   */
+  if (!saving && isMine(sub) && !mayReview && !isPaid(sub) && !isClosed(sub)) {
     const wd = document.createElement("button");
     wd.className = "btn caution"; wd.type = "button"; wd.textContent = "Withdraw";
     wd.title = "Take this claim back. Nothing is paid and it leaves the queue.";
@@ -8699,6 +8969,12 @@ function paintOriginal(sub, retried) {
  * than kept in a variable: the whole payments view is rebuilt on every render,
  * but this input is markup that survives it, so the DOM is already where the
  * answer lives. Keeping a second copy is how the two come to disagree. */
+$("q-who").addEventListener("input", () => renderQueue());
+$("q-who").addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.target.value) { e.target.value = ""; renderQueue(); }
+});
+$("q-approve").addEventListener("click", approvePicked);
+
 $("pay-who").addEventListener("input", () => renderPayments());
 // Escape clears it, which is what a search box does everywhere else.
 $("pay-who").addEventListener("keydown", (e) => {
@@ -11265,14 +11541,19 @@ let mineSection = "pending";
  * money - and the tab that grouped them answered the question with a word
  * that means neither.
  *
- * Withdrawn claims sit with rejected: from the claimant's side both mean "no
- * money is coming", and the row's own badge says which of the two it was.
+ * Withdrawn claims had a tab of their own taken away from them, on the
+ * reasoning that from the claimant's side both mean "no money is coming".
+ * True, and not the distinction that matters: one is a decision somebody else
+ * made about your claim and the other is one you made yourself. Looking for a
+ * receipt you took back among the ones the company refused reads as being
+ * told off for it, and the count beside "Rejected" was inflated by claims
+ * nobody had rejected.
  */
 const MINE_SECTIONS = [
   ["pending", "Pending settlement", (sub) => !isClosed(sub)],
   ["settled", "Settled", (sub) => claimStage(sub).stage === "settled"],
-  ["rejected", "Rejected",
-   (sub) => ["rejected", "withdrawn"].includes(claimStage(sub).stage)],
+  ["rejected", "Rejected", (sub) => claimStage(sub).stage === "rejected"],
+  ["withdrawn", "Withdrawn", (sub) => claimStage(sub).stage === "withdrawn"],
 ];
 
 function renderMineTabs(buckets) {
@@ -11320,6 +11601,7 @@ function renderMine() {
       !mine.length ? "Nothing submitted yet. Upload a receipt above, or send one from WhatsApp."
       : mineSection === "settled" ? "Nothing reimbursed yet — everything you have sent is still in flight."
       : mineSection === "rejected" ? "Nothing of yours has been refused."
+      : mineSection === "withdrawn" ? "You have not taken any claim back."
       : "Nothing waiting. Everything you have sent has been settled or refused."
     }</td>`;
     tb.appendChild(tr); return;
