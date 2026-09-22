@@ -5024,6 +5024,29 @@ function approveBlocker(sub) {
 
 const canApproveNow = (sub) => !approveBlocker(sub);
 
+/** Why this claim cannot be paid yet, or "" when it can.
+ *
+ * The same two facts the approval gate asks for, asked again at the moment
+ * the money moves - and not redundancy, because a claim reaches Pending
+ * settlement by two routes and only one of them passes that gate. The agent
+ * clears a claim against the policy without any person deciding it, and
+ * everything that can change afterwards (a type disabled, a group deleted, a
+ * claim approved before either rule existed) lands here.
+ *
+ * Checked on the server too. This is the version that keeps the button
+ * honest; that one is the version that decides. */
+function payBlocker(sub) {
+  if (!rules.types.some(t => t.enabled && t.id === sub.type)) {
+    return "No expense type is set. Set one above — every payment is reported "
+         + "under one.";
+  }
+  if ((ORG_PROFILE.groups || []).length && !sub.groupId) {
+    return "No cost centre is set. Set a group above — there is no budget this "
+         + "could come out of.";
+  }
+  return "";
+}
+
 /** The button, saying what it will do and to how many. */
 function paintApproveButton() {
   const btn = $("q-approve");
@@ -6632,6 +6655,22 @@ function renderSettleOnClaim(sub, maySettle) {
   // The row above already says it cleared; this adds the figure and the payee.
   owed.textContent = `${fmt(c.outstanding, ccy)} owed to ${sub.who}.`;
   bar.appendChild(owed);
+
+  /* Not payable until it can be filed.
+   *
+   * Said here rather than left to the server's refusal, and said as the thing
+   * to do rather than as an error: finance holds the expense type on this
+   * page now, and the group is on the form below, so both answers are within
+   * reach of the person reading this line. */
+  const unready = payBlocker(sub);
+  if (unready) {
+    const why = document.createElement("span");
+    why.className = "stamp pending";
+    why.style.color = "var(--warn)";
+    why.textContent = unready;
+    bar.appendChild(why);
+    return;
+  }
 
   /* Pay it, or send it back. Rejecting is not one of the two.
    *
@@ -9290,7 +9329,11 @@ function renderPayments() {
    * already there.
    */
   const payees = new Set(awaiting.map(c => String(c.sub.who || "")));
-  const batchable = awaiting.length > 1 && payees.size === 1 && can.seeQueue();
+  // Every claim in the batch has to be payable, or the server refuses the
+  // whole thing and names one of them. Better to not offer it.
+  const allReady = awaiting.every(c => !payBlocker(c.sub));
+  const batchable = awaiting.length > 1 && payees.size === 1 && allReady
+    && can.seeQueue();
   const batchBtn = $("pay-batch");
   if (batchBtn) {
     batchBtn.hidden = !batchable;
@@ -12206,11 +12249,22 @@ async function saveAnswers() {
   // that type, and it may clear for payment without further review" - is no
   // longer true and was never wanted. Saving records a fact; the claim stays
   // in front of this reviewer, who then approves or rejects it themselves.
-  if (untagged && !window.confirm(
-      `Set this claim to ${label0}?\n\n`
-      + "Nothing in your policy covered it, so this is your judgment about "
-      + "what it is. It is recorded against your name, and the claim stays "
-      + "here for you to approve or reject.")) return;
+  /* No confirmation for tagging an untagged claim.
+   *
+   * There was one, on the reasoning that putting a type on a claim the agent
+   * could not classify is a judgment worth a deliberate second press. The
+   * judgment is real; the dialog was not where it lives. Nothing is decided
+   * by saving - the claim stays exactly where it is, in front of the same
+   * person, and Approve is still withheld until the type and the cost centre
+   * are both recorded. That gate is the control, and it is the one that
+   * cannot be clicked through.
+   *
+   * What the dialog actually did was tax the common case. A reviewer working
+   * a queue where most claims need a type answered it once per claim, and a
+   * confirmation everybody learns to dismiss is worth nothing on the day it
+   * matters.
+   */
+  void untagged;
 
   /* A flag rather than a disabled element.
    *
