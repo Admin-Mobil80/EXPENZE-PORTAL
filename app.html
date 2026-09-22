@@ -1368,6 +1368,14 @@ td.n .pending { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:v
 .batchform { border-bottom:1px solid var(--rule); background:var(--surface-2);
   padding:13px 14px; display:flex; flex-direction:column; gap:11px; }
 .batchform .bhead { font-size:.84rem; color:var(--ink-2); }
+/* What this payment leaves behind. Warm rather than red: nothing is wrong,
+   there is simply more to do afterwards. */
+.batchform .bheld { font-size:.78rem; line-height:1.55; color:var(--warn);
+  background:var(--warn-bg); border-radius:var(--radius); padding:7px 10px; }
+/* The line that answers "where has the settle-together button gone". */
+.batchwhy { margin:0 14px 12px; padding:9px 13px; border-radius:var(--radius);
+  font-size:.78rem; line-height:1.55; color:var(--muted);
+  background:var(--surface-2); border:1px solid var(--rule); }
 .batchform .bhead b { font-variant-numeric:tabular-nums; }
 /* The claims themselves, not a count of them. "8 claims" is something to
    take on trust; the references are what somebody checks against the
@@ -2052,6 +2060,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
         <input type="search" id="pay-who" class="payfind" placeholder="Filter by submitter" aria-label="Filter by submitter" autocomplete="off">
         <button class="btn" type="button" id="pay-print">Print all bills</button>
         <button class="btn primary" type="button" id="pay-batch" hidden>Settle together</button></header>
+      <p class="msg paymsg batchwhy" id="pay-batch-why" hidden></p>
       <div class="batchslot" id="batch-slot"></div>
       <div class="banner" id="pay-banner"></div>
       <!-- Foreign claims that could not be converted. Not payable, and not
@@ -9458,30 +9467,71 @@ function renderPayments() {
    * Two or more, because settling one claim "together" is the button that is
    * already there.
    */
+  /* Settling one person's claims as the one payment they are.
+   *
+   * Offered on whatever *can* be paid rather than only when everything can.
+   *
+   * It used to require the whole list to be ready, and then it simply was not
+   * there - no button, no reason, nothing to click. That was tolerable while
+   * a claim could not be approved without an expense type and a cost centre,
+   * because almost everything arriving here had both. It stopped being
+   * tolerable the moment those became finance's to fill in: of twenty claims
+   * waiting, three were ready, and the control vanished without saying so.
+   *
+   * So it pays the ones it can and names the ones it cannot. Settling five of
+   * somebody's seven claims in one transfer is a perfectly ordinary thing to
+   * do; the other two wait for a type or a group and are listed by name on
+   * the form, so nobody can mistake this for having paid everything.
+   */
   const payees = new Set(awaiting.map(c => String(c.sub.who || "")));
-  // Every claim in the batch has to be payable, or the server refuses the
-  // whole thing and names one of them. Better to not offer it.
-  const allReady = awaiting.every(c => !payBlocker(c.sub));
-  const batchable = awaiting.length > 1 && payees.size === 1 && allReady
-    && can.seeQueue();
+  const ready = awaiting.filter(c => !payBlocker(c.sub));
+  const held = awaiting.filter(c => payBlocker(c.sub));
+  const onePayee = payees.size === 1 && awaiting.length > 1;
+  const batchable = onePayee && ready.length > 1 && can.seeQueue();
+
   const batchBtn = $("pay-batch");
   if (batchBtn) {
     batchBtn.hidden = !batchable;
-    const owed = awaiting.reduce((t, c) => t + c.outstanding, 0);
+    const owed = ready.reduce((t, c) => t + c.outstanding, 0);
     const payCcy = orgCurrency();
-    batchBtn.textContent = batchOpen
-      ? "Cancel"
-      : `Settle ${awaiting.length} claims as one payment\u2026`;
+    batchBtn.textContent = batchOpen ? "Cancel"
+      : held.length
+      // The count says both numbers, so "settle together" on a filtered list
+      // cannot be read as "settle everything of theirs".
+      ? `Settle ${ready.length} of ${awaiting.length} as one payment\u2026`
+      : `Settle ${ready.length} claims as one payment\u2026`;
     batchBtn.title = batchable
       ? `One transfer of ${fmt(owed, payCcy)} to ${[...payees][0]}, recorded `
-        + `against all ${awaiting.length} claims.`
+        + `against ${ready.length} claims.`
       : "";
     batchBtn.onclick = () => { batchOpen = !batchOpen; renderPayments(); };
   }
+
+  /* And when it cannot be offered, say so rather than showing nothing.
+   *
+   * A control that is simply absent is indistinguishable from one that was
+   * never built. This is the line that answers "where has it gone". */
+  const batchWhy = $("pay-batch-why");
+  if (batchWhy) {
+    batchWhy.hidden = !(can.seeQueue() && !batchable && awaiting.length > 1);
+    batchWhy.textContent =
+      !onePayee
+      ? `These claims are ${payees.size} people's. Filter by submitter to `
+        + "settle one person's together — a transfer goes to somebody."
+      : ready.length === 1
+      ? "Only one of these can be paid yet; the rest need an expense type or "
+        + "a cost centre. Settle it on its own row."
+      : "None of these can be paid yet — each needs an expense type or a cost "
+        + "centre. Open one to set them, or set them in bulk from the review "
+        + "queue before approving.";
+  }
+
   const slot = $("batch-slot");
   if (slot) {
     slot.textContent = "";
-    if (batchable && batchOpen) slot.appendChild(batchForm(awaiting, orgCurrency()));
+    if (batchable && batchOpen) {
+      slot.appendChild(batchForm(ready, orgCurrency(), held));
+    }
   }
   const part = claims.filter(c => c.paid > 0 && c.outstanding > 0);
   const done = claims.filter(c => c.outstanding === 0);
@@ -10385,7 +10435,7 @@ function openReasonForm(sub, kind, action) {
 let batchOpen = false;
 let batchBusy = false;
 
-function batchForm(claims, ccy) {
+function batchForm(claims, ccy, held) {
   const who = claims[0].sub.who;
   const owed = claims.reduce((t, c) => t + c.outstanding, 0);
   // Same test the single form uses: does this person actually hold one.
@@ -10406,9 +10456,25 @@ function batchForm(claims, ccy) {
     + `<span class="bv">${esc(c.sub.vendor || "")}</span>`
     + `<span class="ba">${esc(fmt(c.outstanding, ccy))}</span></div>`).join("");
 
+  /* What is not in this payment, by name.
+   *
+   * Finance is about to make one transfer and tick a person off. If two of
+   * their seven claims are missing a cost centre and are quietly not in it,
+   * the person is short and nothing on the screen said so. Naming them is
+   * also the shortest route to fixing them - the reference is what somebody
+   * searches for. */
+  const excluded = (held || []).length
+    ? `<div class="bheld">Not in this payment: `
+      + (held.map(c => `<b>${esc(c.sub.reference || c.sub.id)}</b> `
+          + `(${esc(payBlocker(c.sub).split(".")[0].toLowerCase())})`).join(", "))
+      + `. They stay in this list until each has an expense type and a cost `
+      + `centre.</div>`
+    : "";
+
   box.innerHTML =
     `<div class="bhead">One payment of <b>${esc(fmt(owed, ccy))}</b> to `
     + `${esc(who)}, recorded against ${claims.length} claims.</div>`
+    + excluded
     + `<div class="blist">${rows}`
     + `<div class="brow btot"><span>Total</span><span class="bv"></span>`
     + `<span class="ba">${esc(fmt(owed, ccy))}</span></div></div>`
