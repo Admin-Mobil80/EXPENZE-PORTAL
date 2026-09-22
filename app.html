@@ -5097,18 +5097,28 @@ async function approvePicked() {
       submission_ids: chosen.map(s => s.id),
     }));
   } catch (_) {
-    data = { error: "Network error — nothing was recorded." };
+    data = { error: "Network error — it is not clear what was recorded. "
+                    + "Refresh before trying again." };
   }
+  /* Released the moment the server answers, not after the reload.
+   *
+   * `loadRecords` follows this call and takes a second or two of its own, and
+   * the button kept saying "Approving…" through all of it with every row
+   * still ticked. Eleven claims took four seconds on the server and closer to
+   * seven on screen, which is long enough to read as stuck - and it was
+   * reported as stuck. Nothing was wrong; the row just stopped telling the
+   * truth as soon as the work was done. */
   approving = false;
+  paintApproveButton();
 
   if (!ok) {
     // The server names the claim that stopped it, which is the useful half:
     // the reviewer opens that one rather than guessing which of twelve.
     say(data.error || "Could not approve those claims.", false);
-    paintApproveButton();
     return;
   }
   picked.clear();
+  say(`${data.count} approved. Refreshing…`, true);
   await loadRecords();
   renderAll();
   const sent = Object.entries(data.sent || {}).filter(([, v]) => v).map(([k]) => k);
@@ -10273,6 +10283,10 @@ let batchBusy = false;
 function batchForm(claims, ccy) {
   const who = claims[0].sub.who;
   const owed = claims.reduce((t, c) => t + c.outstanding, 0);
+  // Same test the single form uses: does this person actually hold one.
+  const holdsFloat = !!(ADVANCES.holders || []).find(h =>
+    (h.email || "").toLowerCase()
+      === String(claims[0].sub.whoEmail || "").toLowerCase());
   const box = document.createElement("div");
   box.className = "batchform";
 
@@ -10294,9 +10308,20 @@ function batchForm(claims, ccy) {
     + `<div class="brow btot"><span>Total</span><span class="bv"></span>`
     + `<span class="ba">${esc(fmt(owed, ccy))}</span></div></div>`
     + `<div class="bfields">`
-    + `<div class="sf"><label for="bf-src">Settle from</label>`
+    /* The choice, only for somebody who holds a float.
+     *
+     * The single settlement form has always worked this way and this one did
+     * not: it offered "Their float" to everybody, so a person who had never
+     * been given an advance could have four claims drawn down against a float
+     * that does not exist. For everybody else there is no choice to make, and
+     * a dropdown with one real option is furniture that can be got wrong.
+     *
+     * Kept in the markup either way, hidden, so the reader below can find it
+     * without caring whether it was drawn. */
+    + `<div class="sf"${holdsFloat ? "" : " hidden"}><label for="bf-src">Settle from</label>`
     + `<select id="bf-src"><option value="payout">A separate payout</option>`
-    + `<option value="float">Their float</option></select></div>`
+    + (holdsFloat ? `<option value="float">Their float</option>` : "")
+    + `</select></div>`
     + `<div class="sf"><label for="bf-mode">Mode</label>`
     + `<select id="bf-mode">${["bank transfer", "UPI", "cash", "cheque", "card"]
         .map(m => `<option value="${m}">${m}</option>`).join("")}</select></div>`
