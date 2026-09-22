@@ -1202,6 +1202,10 @@ tr.opens:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
 /* The queue is empty. Green, because finishing is a good outcome and the
    stamp beside it is already reporting the decision that emptied it. */
 .stamp.done { color:var(--ok); }
+/* And a refusal in the colour a refusal is everywhere else on this page. */
+.stamp.bad { color:var(--bad); }
+/* The bar itself, so the line is not red on a green ground. */
+.actions.refused { background:var(--bad-bg); border-color:var(--bad); }
 .stage-by { font-family:"IBM Plex Mono",monospace; font-size:.65rem; color:var(--muted);
   margin-left:6px; white-space:nowrap; }
 /* Everything that identifies a row, on one line beneath the thing it
@@ -1352,6 +1356,33 @@ td.n .pending { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:v
 /* The reason goes to a person verbatim, so the box it is written in is a text
    box and not a one-line prompt. */
 .settle .sf.wide { max-width:46rem; }
+/* Settling several claims as one payment. Inside the panel, under the header
+   that opened it, so it reads as belonging to the list it is about. */
+.batchslot:empty { display:none; }
+.batchform { border-bottom:1px solid var(--rule); background:var(--surface-2);
+  padding:13px 14px; display:flex; flex-direction:column; gap:11px; }
+.batchform .bhead { font-size:.84rem; color:var(--ink-2); }
+.batchform .bhead b { font-variant-numeric:tabular-nums; }
+/* The claims themselves, not a count of them. "8 claims" is something to
+   take on trust; the references are what somebody checks against the
+   transfer they are about to make. */
+.batchform .blist { background:var(--surface); border:1px solid var(--rule);
+  border-radius:var(--radius); max-height:190px; overflow:auto; }
+.batchform .brow { display:grid; grid-template-columns:150px 1fr auto; gap:10px;
+  padding:5px 11px; font-family:"IBM Plex Mono",monospace; font-size:.69rem;
+  border-bottom:1px solid var(--rule); }
+.batchform .brow:last-child { border-bottom:none; }
+.batchform .brow .bv { color:var(--muted); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.batchform .brow .ba { font-variant-numeric:tabular-nums; }
+.batchform .btot { position:sticky; bottom:0; background:var(--surface-2);
+  font-weight:600; border-top:1px solid var(--rule-firm); }
+.batchform .bfields { display:flex; gap:11px; flex-wrap:wrap;
+  align-items:flex-start; }
+.batchform .bfields .sf { display:flex; flex-direction:column; gap:4px; }
+.batchform .bfields .sf.wide { flex:1; min-width:200px; }
+.batchform .bgo { display:flex; gap:11px; align-items:center; flex-wrap:wrap; }
+
 /* The submitter filter, in the panel header beside the count it changes. */
 .payfind { font:inherit; font-size:.8rem; padding:5px 9px; width:190px;
   border:1px solid var(--rule-firm); border-radius:var(--radius);
@@ -1987,7 +2018,9 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
            that person's list - and then the total above it is the figure
            that goes on the transfer. -->
         <input type="search" id="pay-who" class="payfind" placeholder="Filter by submitter" aria-label="Filter by submitter" autocomplete="off">
-        <button class="btn" type="button" id="pay-print">Print all bills</button></header>
+        <button class="btn" type="button" id="pay-print">Print all bills</button>
+        <button class="btn primary" type="button" id="pay-batch" hidden>Settle together</button></header>
+      <div class="batchslot" id="batch-slot"></div>
       <div class="banner" id="pay-banner"></div>
       <!-- Foreign claims that could not be converted. Not payable, and not
            zero - saying so is the only way they are not simply missing. -->
@@ -5798,6 +5831,9 @@ function renderDetail() {
   });
 
   const abox = $("actions"); abox.textContent = "";
+  // Cleared with the contents. A tint left on from the last claim would say
+  // "rejected" over the buttons of one nobody has decided.
+  abox.classList.remove("refused");
   const mayReview = reviewingHere();
 
   // Your own claim, yours to take back - until the money has moved, at which
@@ -5840,6 +5876,18 @@ function renderDetail() {
   } else if (decision || settlementStage(sub)) {
     const s = document.createElement("span"); s.className="stamp";
     const stageNow = settlementStage(sub);
+    /* A refusal reads as a refusal.
+     *
+     * "Rejected by Riyad Rasheed at 16:29" sat in the same ink as "Settled by
+     * Madhusudhan", on a bar tinted the same as an approval - so the one line
+     * on the page that says somebody is not getting their money looked
+     * exactly like the one that says they are. The badge above it was already
+     * red; this is the sentence underneath it.
+     */
+    const refused = (decision && decision.action === "Rejected")
+      || (stageNow || "").toLowerCase().startsWith("reject");
+    if (refused) s.classList.add("bad");
+    abox.classList.toggle("refused", !!refused);
     // Lead with what happened last. On a paid claim "Approved by" describes a
     // step two moves back, and it was the only line in the actions row, so a
     // claim reached from the Settled tab announced itself as approved.
@@ -6959,6 +7007,10 @@ const NOTICE_WHEN = {
   rejected: "the rejection notice",
   disputed: "the notice that it went back for review",
   settled: "the settlement notice",
+  // One payment covering several claims. The email says it once, with the
+  // total and every claim it covers; WhatsApp says it per claim, because an
+  // approved template is shaped for one.
+  settled_batch: "the settlement notice \u2014 one payment, several claims",
 };
 
 const STAGE_LABEL = {
@@ -8949,6 +9001,39 @@ function renderPayments() {
       + "belongs to.";
     printAll.onclick = () => printBills(awaiting.map(c => c.sub), payMsg);
   }
+
+  /* Settle several claims as the one payment they actually are.
+   *
+   * Offered only when every row belongs to one person, because that is the
+   * only time it means anything: a transfer goes to somebody, and "settle
+   * these eight claims across three people" is three transfers however it is
+   * recorded. The submitter filter above is how a mixed list becomes one
+   * person's, which is what that box is for.
+   *
+   * Two or more, because settling one claim "together" is the button that is
+   * already there.
+   */
+  const payees = new Set(awaiting.map(c => String(c.sub.who || "")));
+  const batchable = awaiting.length > 1 && payees.size === 1 && can.seeQueue();
+  const batchBtn = $("pay-batch");
+  if (batchBtn) {
+    batchBtn.hidden = !batchable;
+    const owed = awaiting.reduce((t, c) => t + c.outstanding, 0);
+    const payCcy = orgCurrency();
+    batchBtn.textContent = batchOpen
+      ? "Cancel"
+      : `Settle ${awaiting.length} claims as one payment\u2026`;
+    batchBtn.title = batchable
+      ? `One transfer of ${fmt(owed, payCcy)} to ${[...payees][0]}, recorded `
+        + `against all ${awaiting.length} claims.`
+      : "";
+    batchBtn.onclick = () => { batchOpen = !batchOpen; renderPayments(); };
+  }
+  const slot = $("batch-slot");
+  if (slot) {
+    slot.textContent = "";
+    if (batchable && batchOpen) slot.appendChild(batchForm(awaiting, orgCurrency()));
+  }
   const part = claims.filter(c => c.paid > 0 && c.outstanding > 0);
   const done = claims.filter(c => c.outstanding === 0);
 
@@ -9727,6 +9812,10 @@ const SETTLE_REJECT_REASONS = [
   "The physical bill does not match this claim.",
   "The claim has been withdrawn by the submitter.",
   "This has already been reimbursed by another route.",
+  // Not a judgment about the claim, which is what the review reasons are.
+  // This is about when it arrived: a bill handed in months after the spend
+  // cannot be checked against anything and lands in a closed period.
+  "Claimed too long after the spend.",
 ];
 
 function reasonChoices(sub, kind) {
@@ -9781,6 +9870,21 @@ function openReasonForm(sub, kind, action) {
     </div>`;
   slot.appendChild(box);
 
+  /* The button that opened this goes while it is open.
+   *
+   * The row above still held its Reject, and this form's own button says
+   * "Reject claim" - so pressing Reject produced two red buttons, one under
+   * the other, both apparently offering the same thing. Only the lower one
+   * does anything: the upper one reopens the form that is already open.
+   *
+   * Hidden rather than re-rendered. A render rebuilds the actions row and
+   * clears this slot, which would take the half-written reason with it.
+   */
+  const openers = [...($("actions") || { querySelectorAll: () => [] })
+    .querySelectorAll("button.danger, button.caution")];
+  openers.forEach(b => { b.hidden = true; });
+  const restore = () => openers.forEach(b => { b.hidden = false; });
+
   const pick = box.querySelector("#rr-pick");
   const text = box.querySelector("#rr-text");
   const count = box.querySelector("#rr-count");
@@ -9798,7 +9902,10 @@ function openReasonForm(sub, kind, action) {
   // see what they are about to send and change it.
   pick.addEventListener("change", () => { text.value = pick.value; paint(); text.focus(); });
   text.addEventListener("input", paint);
-  box.querySelector("#rr-cancel").addEventListener("click", () => { slot.textContent = ""; });
+  box.querySelector("#rr-cancel").addEventListener("click", () => {
+    slot.textContent = "";
+    restore();
+  });
   go.addEventListener("click", () => decide(sub, action, go, { reason: text.value.trim() }));
   paint();
   text.focus();
@@ -9810,6 +9917,146 @@ function openReasonForm(sub, kind, action) {
    reviewer had already cleared, with no reviewer involved in the refusal. That
    is the review step happening in the wrong place and by the wrong person;
    "Send back for review" puts it in front of the people whose job it is. */
+
+
+/* ---------- settling several claims as one payment ----------
+
+   Finance pays a person, not a claim. Somebody with four receipts waiting is
+   owed one amount and gets one transfer, and settling that four times over
+   left four records each claiming to be the payment, four rows in the audit
+   log against one UTR, and four messages about money that moved once.
+
+   What is recorded is still per claim, because that is what a claim is - each
+   row keeps its own share, and they share the reference that ties all of them
+   to the one line on the statement. What changes is that it is one act. */
+
+// Whether the form is open. Not which claims it is for: those come from the
+// list as it stands when it is submitted, so a claim settled in another tab
+// between opening the form and pressing the button cannot be paid twice.
+let batchOpen = false;
+let batchBusy = false;
+
+function batchForm(claims, ccy) {
+  const who = claims[0].sub.who;
+  const owed = claims.reduce((t, c) => t + c.outstanding, 0);
+  const box = document.createElement("div");
+  box.className = "batchform";
+
+  /* The list is part of the form, not a summary above it.
+   *
+   * This button records a payment against several claims at once, and the
+   * reader has to be able to see exactly which ones before they press it.
+   * "8 claims" is a count; the references are what they can check against
+   * what they are about to transfer. */
+  const rows = claims.map(c =>
+    `<div class="brow"><span>${esc(c.sub.reference || c.sub.id)}</span>`
+    + `<span class="bv">${esc(c.sub.vendor || "")}</span>`
+    + `<span class="ba">${esc(fmt(c.outstanding, ccy))}</span></div>`).join("");
+
+  box.innerHTML =
+    `<div class="bhead">One payment of <b>${esc(fmt(owed, ccy))}</b> to `
+    + `${esc(who)}, recorded against ${claims.length} claims.</div>`
+    + `<div class="blist">${rows}`
+    + `<div class="brow btot"><span>Total</span><span class="bv"></span>`
+    + `<span class="ba">${esc(fmt(owed, ccy))}</span></div></div>`
+    + `<div class="bfields">`
+    + `<div class="sf"><label for="bf-src">Settle from</label>`
+    + `<select id="bf-src"><option value="payout">A separate payout</option>`
+    + `<option value="float">Their float</option></select></div>`
+    + `<div class="sf"><label for="bf-mode">Mode</label>`
+    + `<select id="bf-mode">${["bank transfer", "UPI", "cash", "cheque", "card"]
+        .map(m => `<option value="${m}">${m}</option>`).join("")}</select></div>`
+    + `<div class="sf"><label for="bf-ref">Transaction reference</label>`
+    + `<input id="bf-ref" autocomplete="off" placeholder="UTR / cheque no."></div>`
+    + `<div class="sf"><label for="bf-date">Paid on</label>`
+    + `<input type="date" id="bf-date" value="${new Date().toISOString().slice(0, 10)}"></div>`
+    + `<div class="sf wide"><label for="bf-note">Note</label>`
+    + `<input id="bf-note" autocomplete="off" placeholder="Optional"></div>`
+    + `</div>`
+    // Says the figure it is about to record, for the reason the single
+    // settlement button does: two identically labelled buttons a few pixels
+    // apart is how a claim got settled by somebody who never saw the form.
+    + `<div class="bgo"><button class="btn primary" type="button" id="bf-go">`
+    + `Record ${esc(fmt(owed, ccy))} as paid</button>`
+    + `<span class="sf-hint" id="bf-hint">The submitter is emailed once, `
+    + `naming every claim this covers.</span></div>`;
+
+  const src = box.querySelector("#bf-src");
+  const ref = box.querySelector("#bf-ref");
+  const hint = box.querySelector("#bf-hint");
+  // A float settlement moves no money, so there is no statement line to tie
+  // it to and no reference to give. Same rule as the single form.
+  const follow = () => {
+    const float = src.value === "float";
+    ref.disabled = float;
+    ref.placeholder = float ? "Not needed — no transfer was made" : "UTR / cheque no.";
+    box.querySelector("#bf-mode").disabled = float;
+    hint.textContent = float
+      ? `Drawn from ${who}'s float. No payment is made; their advance falls by `
+        + `${fmt(owed, ccy)}.`
+      : "The submitter is emailed once, naming every claim this covers.";
+  };
+  src.addEventListener("change", follow);
+  follow();
+
+  box.querySelector("#bf-go").addEventListener("click", () => settleBatch(claims, ccy));
+  return box;
+}
+
+/** Record one payment against every claim in the list. */
+async function settleBatch(claims, ccy) {
+  if (batchBusy) return;
+  const go = $("bf-go"), src = $("bf-src"), ref = $("bf-ref");
+  const source = src.value;
+  const reference = (ref.value || "").trim();
+  if (source !== "float" && !reference) {
+    payMsg("Give the transaction reference. It is what ties these claims to "
+           + "the one line on the bank statement.", false);
+    ref.focus();
+    return;
+  }
+
+  batchBusy = true;
+  go.disabled = true;
+  go.textContent = "Recording…";
+
+  const owed = claims.reduce((t, c) => t + c.outstanding, 0);
+  let ok = false, data = {};
+  try {
+    ({ ok, data } = await authCall("/claim/settle-batch", {
+      claims: claims.map(c => ({
+        submission_id: c.sub.id, amount: (c.outstanding / 100).toFixed(2),
+      })),
+      // Sent so the server can refuse a batch that no longer adds up. If
+      // something settled in another tab while this form was open, the two
+      // figures disagree and nothing is written.
+      paid: (owed / 100).toFixed(2),
+      currency: ccy, source,
+      mode: source === "float" ? "" : $("bf-mode").value,
+      reference: source === "float" ? "" : reference,
+      paid_on: $("bf-date").value || "",
+      note: ($("bf-note").value || "").trim(),
+    }));
+  } catch (_) {
+    data = { error: "Network error — nothing was recorded." };
+  }
+
+  batchBusy = false;
+  if (!ok) {
+    go.disabled = false;
+    go.textContent = `Record ${fmt(owed, ccy)} as paid`;
+    payMsg(data.error || "Could not record that payment.", false);
+    return;
+  }
+
+  batchOpen = false;
+  await loadRecords();
+  renderAll();
+  const sent = Object.entries(data.sent || {}).filter(([, v]) => v).map(([k]) => k);
+  payMsg(`${fmt(owed, ccy)} recorded against ${claims.length} claims for `
+         + `${claims[0].sub.who}.`
+         + (sent.length ? ` Notified by ${sent.join(" and ")}.` : ""), true);
+}
 
 /** Record the rejection, then tell the person who claimed. */
 async function reject(claim, reason) {
