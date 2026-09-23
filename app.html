@@ -5662,6 +5662,22 @@ function renderDetail() {
     if (stale) { stale.hidden = true; stale.textContent = ""; }
     answerMsgFor = null;
   }
+  /* And the settlement confirmation, which belongs to one claim too.
+   *
+   * "Settled in full. Manjunath K J was notified by email and whatsapp." sat
+   * on Rehaan's claim, above a Reject button and an amount still owed. It was
+   * true when it was written, about a different claim and a different person,
+   * and nothing took it down - so every claim opened afterwards carried
+   * somebody else's receipt for money that had gone to somebody else.
+   *
+   * Same rule as the line above it: written after a render, so it survives
+   * the re-render that follows the click, and only a different claim
+   * invalidates it. */
+  if (payMsgFor && payMsgFor !== sub.id) {
+    const stale = $("claim-pay-msg");
+    if (stale) { stale.hidden = true; stale.textContent = ""; }
+    payMsgFor = null;
+  }
   selectedId = sub.id;
   const w = workingCopy(sub), res = evaluate(sub), ccy = res.currency;
   const decision = decisions[sub.id];
@@ -5908,16 +5924,24 @@ function renderDetail() {
   const gfield = $("group-field");
   if (gfield) {
     const groups = ORG_PROFILE.groups || [];
-    /* Hidden while the payment form is on screen, which carries its own.
+    /* One control, and it is this one.
      *
-     * Two dropdowns over one value, six inches apart, is a question about
-     * which one wins. At review this is the only one there is - and a claim
-     * can be held *on* the group, so the person unblocking it has to be able
-     * to answer here. At settlement the question belongs beside the amount,
-     * the mode and the reference, which is the rest of what a payment is. */
-    const payingHere = settlingHere() && !isPaid(sub)
-      && payableClaims().some(c => c.sub.id === sub.id && c.outstanding > 0);
-    gfield.hidden = !groups.length || payingHere;
+     * It used to hide whenever the payment form could be drawn, on the
+     * reasoning that two dropdowns over one value six inches apart is a
+     * question about which one wins. The answer turned out to be neither.
+     *
+     * The settlement form's copy never persisted anything - it wrote the
+     * choice into the working copy and passed a *label* along with the
+     * notice, so the cost centre on the record was unchanged. And once a
+     * settlement was refused for want of a group, the button that opened
+     * that form stopped being drawn at all. So finance had one control that
+     * did not save and another they could not reach, on the one screen where
+     * the field is now theirs to fill in. Madhusudhan could not set a group
+     * anywhere.
+     *
+     * This one writes through `/claim/retype`, which is the only path that
+     * records it. The settlement form's has gone. */
+    gfield.hidden = !groups.length;
     if (groups.length) {
       const g = groupOf(sub);
       const gs = $("claim-group"); gs.textContent = "";
@@ -6013,10 +6037,12 @@ function renderDetail() {
    * same control writes `false` back over the first, which is how a settled
    * claim came to offer an editable Expense type. */
   const classFrozen = busy || !(reviewingHere() || settlingHere());
-  ["headcount", "src", "ccy", "claim-group"].forEach(id => {
+  ["headcount", "src", "ccy"].forEach(id => {
     const el = $(id); if (el) el.disabled = frozen;
   });
-  ["etype"].forEach(id => {
+  // The group joins the expense type: both say how the claim is filed, and
+  // filing is finance's. Neither prices it.
+  ["etype", "claim-group"].forEach(id => {
     const el = $(id); if (el) el.disabled = classFrozen;
   });
 
@@ -6449,16 +6475,22 @@ function renderDetail() {
     abox.appendChild(s4);
   } else if (!mayReview) {
     const s2 = document.createElement("span"); s2.className="stamp pending";
-    /* Said differently depending on whose move it is, and who is asking.
+    /* Said differently depending on who is reading it.
      *
      * "You will hear the outcome by email and WhatsApp" is the submitter's
      * line. A finance executive reaches this branch too now that deciding is
      * an owner's or an administrator's act - and telling them to watch their
      * inbox for a claim sitting on somebody else's desk is not an answer to
-     * the question they have, which is why they cannot act on it. */
-    s2.textContent = asking
-      ? "Waiting on your answer above. Nothing else is in question."
-      : can.seeQueue()
+     * the question they have, which is why they cannot act on it.
+     *
+     * There was a third arm here, on a variable called `asking`, from when
+     * the product put questions to submitters. That was removed - nothing is
+     * ever asked of one now - and the variable went with it while the branch
+     * that read it stayed. Every non-reviewer opening an undecided claim hit
+     * a ReferenceError here, which stops `renderDetail` where it stands: no
+     * payment controls, no receipt pane, nothing below this line. It never
+     * showed up because the two branches above catch the common cases. */
+    s2.textContent = can.seeQueue()
       ? "Awaiting review by an owner or administrator. Paying it is yours "
         + "once they have released it."
       : "In review. You will hear the outcome by email and WhatsApp.";
@@ -10098,25 +10130,15 @@ function settleForm(c, ccy) {
    * this form is on screen: at review the header is the only place, and at
    * settlement this is - beside the amount, the mode and the reference, which
    * is the rest of what a payment is. */
-  const g = groupOf(c.sub);
+  /* No group field here.
+   *
+   * There was one, and it wrote to the working copy rather than to the claim
+   * - so a cost centre chosen on this form was never recorded, and the only
+   * trace of it was a label in the notice. The control on the claim header
+   * above does record it, through the one endpoint that writes the field, so
+   * that is the one that is left. */
   const wrap = td.querySelector("#sf-group-wrap");
-  if (ORG_PROFILE.groups.length) {
-    const known = g.id ? `<span class="sf-hint">Tagged <strong>${groupLabel(g.id)}</strong> — ${
-      g.how === "auto" ? "their only group"
-      : g.how === "default" ? "the organisation default"
-      : g.how === "user" ? "they chose it on WhatsApp"
-      : g.how === "taxid" ? "the bill is made out to its tax ID"
-      : g.how === "buyername" ? "the bill is made out to it by name" : "set here"}.</span>` : "";
-    wrap.innerHTML = `<label for="sf-group">Group</label>
-      <select id="sf-group">
-        <option value="">Not set</option>
-        ${ORG_PROFILE.groups.map(x => `<option value="${x.id}"${x.id === g.id ? " selected" : ""}>${x.label}</option>`).join("")}
-      </select>${known}`;
-  } else {
-    // No groups configured: an empty cell would still take a column and leave
-    // a gap in the middle of the row.
-    wrap.hidden = true;
-  }
+  if (wrap) wrap.hidden = true;
 
   /* The button follows the box.
    *
@@ -10152,11 +10174,6 @@ function settleForm(c, ccy) {
   nameTheAmount();
 
   td.querySelector("#sf-go").addEventListener("click", () => {
-    const gsel = td.querySelector("#sf-group");
-    if (gsel && gsel.value) {
-      const w = workingCopy(c.sub);
-      w.group = gsel.value; w.groupHow = "finance";
-    }
     const amtEl = td.querySelector("#sf-amt");
     let minor = Math.round(parseFloat(amtEl.value || "0") * 100);
     if (!minor || minor <= 0) { amtEl.focus(); return; }
@@ -10644,6 +10661,9 @@ async function tellClaimant(claim, kind, detail) {
 }
 
 function payMsg(text, good) {
+  // Stamped with whichever claim is open, so moving to another takes it away.
+  // On the list screens there is no claim and nothing to stamp.
+  payMsgFor = (view === "claim" || view === "queue") ? selectedId : null;
   // Settlement now happens on the claim page, so the confirmation belongs
   // there. The Pending settlement list keeps its own for anything that still
   // reports from the list itself.
@@ -12447,6 +12467,9 @@ let decidingOf = null;
 // Which claim the line under the controls is about, so it can be dropped when
 // the page moves to another one. See `renderDetail`.
 let answerMsgFor = null;
+// Which claim the settlement confirmation is about, so it can be taken down
+// when the reader moves to another one. See `renderDetail`.
+let payMsgFor = null;
 
 async function saveAnswers() {
   const sub = SUBMISSIONS.find(s => s.id === selectedId);
