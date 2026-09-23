@@ -11863,9 +11863,22 @@ const MINE_SECTIONS = [
    out, so this reads `ADVANCES` exactly as the administration screen does -
    it is simply a list of one. */
 
-/** This reader's float, or null if they hold none. */
+/** This reader's float, or null if they hold none.
+ *
+ * `LIVE.email` is how the rest of this console answers "who am I" - `isMine`
+ * reads it, so does the WhatsApp prompt key, so does the People list when it
+ * marks a row as you. This asked `currentUser.email`, which does not exist:
+ * that object carries an id, a name, a role, initials and a tier, and never
+ * an address. So the lookup compared undefined against every holder, found
+ * nobody, and the tab never appeared for anybody at all - including the one
+ * person on the account who holds a float, and including an owner who had
+ * just recorded an advance to himself to go and look at it.
+ *
+ * The browser test that "proved" this working set `currentUser.email` in its
+ * own fixture. It was testing a shape the product does not produce.
+ */
 function myFloat() {
-  const me = String((currentUser && currentUser.email) || "").toLowerCase();
+  const me = String((LIVE && LIVE.email) || "").toLowerCase();
   if (!me) return null;
   return (ADVANCES.holders || []).find(
     h => String(h.email || "").toLowerCase() === me) || null;
