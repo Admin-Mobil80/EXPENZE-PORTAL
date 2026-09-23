@@ -1373,6 +1373,16 @@ td.n .pending { font-family:"IBM Plex Mono",monospace; font-size:.68rem; color:v
 .batchform .bheld { font-size:.78rem; line-height:1.55; color:var(--warn);
   background:var(--warn-bg); border-radius:var(--radius); padding:7px 10px; }
 /* The line that answers "where has the settle-together button gone". */
+/* The reader's own float, on My expenses. Three figures and the ledger. */
+.floatbar { display:flex; gap:26px; flex-wrap:wrap; padding:13px 14px;
+  border-bottom:1px solid var(--rule); background:var(--surface-2); }
+.floatbar .fb { display:flex; flex-direction:column; gap:3px; }
+.floatbar .k { font-size:.66rem; text-transform:uppercase; letter-spacing:.07em;
+  color:var(--muted); font-weight:600; }
+.floatbar .v { font-family:"IBM Plex Mono",monospace; font-size:1.05rem;
+  font-variant-numeric:tabular-nums; }
+.floatnote { margin:0; padding:10px 14px; border-bottom:1px solid var(--rule); }
+
 .batchwhy { margin:0 14px 12px; padding:9px 13px; border-radius:var(--radius);
   font-size:.78rem; line-height:1.55; color:var(--muted);
   background:var(--surface-2); border:1px solid var(--rule); }
@@ -1879,6 +1889,25 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
           <th scope="col" style="text-align:right">Settled</th>
           <th scope="col">Status</th>
         </tr></thead><tbody id="mine"></tbody></table>
+      </div>
+
+      <!-- Somebody carrying the company's cash is accountable for it, and the
+           only place that balance existed was a screen they could not open.
+           They were keeping a running total in their head against a ledger
+           somebody else held, and heard about a disagreement by being asked
+           about one. -->
+      <div class="items-scroll" id="mine-float" hidden>
+        <div class="floatbar">
+          <span class="fb"><span class="k">Still out with you</span><span class="v" id="mf-out">—</span></span>
+          <span class="fb"><span class="k">Spent, not yet settled</span><span class="v" id="mf-flight">—</span></span>
+          <span class="fb"><span class="k">In hand</span><span class="v" id="mf-hand">—</span></span>
+        </div>
+        <p class="sf-hint floatnote" id="mf-note"></p>
+        <table><thead><tr>
+          <th scope="col">Date</th><th scope="col">What</th>
+          <th scope="col" style="text-align:right">Amount</th>
+          <th scope="col">Recorded by</th><th scope="col">Note</th>
+        </tr></thead><tbody id="mine-float-log"></tbody></table>
       </div>
     </section>
   </div>
@@ -11242,7 +11271,13 @@ let ADVANCES = { currency: "", holders: [], movements: [] };
 let advFormOpen = false;
 
 async function loadAdvances() {
-  if (!can.seeQueue()) return;
+  /* Fetched for everybody now, not only for whoever can see the whole float.
+   *
+   * The guard was right while this answered "every holder and what they
+   * hold", which is a statement about colleagues' cash. The endpoint narrows
+   * to the caller for anybody below finance, so what a submitter gets back is
+   * their own balance and their own movements - and not fetching it was the
+   * only reason they could not be shown it. */
   const { ok, data } = await authCall("/advances", {});
   if (ok) ADVANCES = {
     currency: data.currency || orgCurrency(),
@@ -11824,16 +11859,104 @@ let mineSection = "pending";
  * nobody had rejected.
  */
 const MINE_SECTIONS = [
+  // The float is not a bucket of claims, so it carries no predicate. See
+  // `renderMine`, which draws it instead of the table.
+  ["float", "Advance", null],
   ["pending", "Pending settlement", (sub) => !isClosed(sub)],
   ["settled", "Settled", (sub) => claimStage(sub).stage === "settled"],
   ["rejected", "Rejected", (sub) => claimStage(sub).stage === "rejected"],
   ["withdrawn", "Withdrawn", (sub) => claimStage(sub).stage === "withdrawn"],
 ];
 
+/* ---------- the reader's own float ----------
+
+   Somebody carrying the company's cash is accountable for it, and the only
+   place that balance existed was a screen they could not open. They were
+   keeping a running total in their head against a ledger somebody else held,
+   and the first they heard of a disagreement was being asked about it.
+
+   The server answers the same shape for everybody and narrows it on the way
+   out, so this reads `ADVANCES` exactly as the administration screen does -
+   it is simply a list of one. */
+
+/** This reader's float, or null if they hold none. */
+function myFloat() {
+  const me = String((currentUser && currentUser.email) || "").toLowerCase();
+  if (!me) return null;
+  return (ADVANCES.holders || []).find(
+    h => String(h.email || "").toLowerCase() === me) || null;
+}
+
+/** The three figures and the ledger behind them, on My expenses. */
+function renderMyFloat() {
+  const box = $("mine-float");
+  const held = myFloat();
+  if (!box) return;
+  if (!held) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const ccy = held.currency || ADVANCES.currency || orgCurrency();
+  const stillOut = advMinor(held.held);
+  const flight = advMinor(held.pending);
+  const inHand = advMinor(held.in_hand);
+
+  $("mf-out").textContent = fmt(stillOut, ccy);
+  $("mf-flight").textContent = fmt(flight, ccy);
+  $("mf-hand").textContent = fmt(inHand, ccy);
+  /* The same colours the administration screen uses, and for the same
+     reason: a negative `in hand` is frequently nothing but a large bill
+     somebody paid personally and is waiting to hear about, while a negative
+     `still out` means more of the company's money has gone than was given. */
+  $("mf-hand").style.color = inHand < 0 ? "var(--warn)" : "";
+  $("mf-out").style.color = stillOut < 0 ? "var(--bad)" : "";
+
+  $("mf-note").textContent = stillOut < 0
+    ? "More has been settled against your float than was advanced to you. "
+      + "Your finance team will want to look at this with you."
+    : flight > 0
+    ? `${fmt(flight, ccy)} of your claims are spent but not yet settled. `
+      + "Until finance decides whether each comes out of this float or is "
+      + "paid to you separately, it is not taken off the figure above."
+    : "What the company has advanced you and not yet accounted for.";
+
+  const log = $("mine-float-log");
+  log.textContent = "";
+  const moves = ADVANCES.movements || [];
+  if (!moves.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="5" class="empty">Nothing recorded yet.</td>';
+    log.appendChild(tr);
+    return;
+  }
+  moves.forEach(m => {
+    const back = m.kind === "return";
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="day">${esc(dayStamp(m.at * 1000))}</td>` +
+      `<td><span class="state ${back ? "off" : "on"}">` +
+        `${back ? "handed back" : "advance"}</span>` +
+        (m.mode ? `<span class="gid" style="margin-left:7px">${esc(m.mode)}</span>` : "") +
+        (m.reference ? `<span class="refno inline">${esc(m.reference)}</span>` : "") +
+      `</td>` +
+      `<td class="n" style="color:${back ? "var(--muted)" : "var(--ok)"}">` +
+        `${back ? "−" : "+"}${fmt(advMinor(m.amount), m.currency || ccy)}</td>` +
+      `<td>${esc(m.by)}</td>` +
+      `<td class="reason">${esc(m.note || "—")}</td>`;
+    log.appendChild(tr);
+  });
+}
+
 function renderMineTabs(buckets) {
   const nav = $("m-subtabs"); if (!nav) return;
   nav.textContent = "";
   MINE_SECTIONS.forEach(([id, label]) => {
+    /* The float tab appears for somebody who has one, and for nobody else.
+     *
+     * Thirty-seven people on this account have never been handed cash, and a
+     * permanently empty tab reading "Advance" is a question they have to open
+     * once to find out has no answer. It appears when there is something to
+     * show and goes when there is not, which is what an advance does. */
+    if (id === "float" && !myFloat()) return;
     const count = (buckets[id] || []).length;
     const b = document.createElement("button");
     b.type = "button";
@@ -11846,6 +11969,7 @@ function renderMineTabs(buckets) {
       // - a count of finished things in an alarm colour is an alarm about
       // nothing.
       flag.className = "navflag" + (id === "pending" ? "" : " count");
+      if (id === "float") return;
       flag.textContent = String(count);
       b.appendChild(flag);
     }
@@ -11859,13 +11983,30 @@ function renderMine() {
   // the same vendor, and listing it twice reads as having been charged twice.
   const mine = SUBMISSIONS.filter(s => isMine(s) && !isCompanion(s));
   const buckets = {};
-  MINE_SECTIONS.forEach(([id, , holds]) => { buckets[id] = mine.filter(holds); });
+  MINE_SECTIONS.forEach(([id, , holds]) => {
+    buckets[id] = holds ? mine.filter(holds) : [];
+  });
   const shown = buckets[mineSection] || buckets.pending;
 
   $("mine-sub").textContent = mine.length + (mine.length === 1 ? " submission" : " submissions");
   $("mine-banner").innerHTML =
     `<strong>Signed in as ${currentUser.name}.</strong><span>Your own receipts, whatever your role &mdash; owners and finance executives buy lunch too. Most people never open this: they send a photo on WhatsApp and get the answer back the same way.</span>`;
   renderMineTabs(buckets);
+
+  /* One tab shows something other than a list of claims.
+   *
+   * And falls back when it disappears underneath somebody: a float that is
+   * settled and closed takes its tab with it, and a reader left standing on
+   * the tab would otherwise get the claims table with nothing in it and an
+   * empty-state sentence about claims they never filed. */
+  if (mineSection === "float" && !myFloat()) mineSection = "pending";
+  const onFloat = mineSection === "float" && myFloat();
+  const scroll = $("mine") ? $("mine").closest(".items-scroll") : null;
+  if (scroll) scroll.hidden = !!onFloat;
+  renderMyFloat();
+  if (onFloat) { wireClaimRows($("mine")); return; }
+  const floatBox = $("mine-float");
+  if (floatBox) floatBox.hidden = true;
 
   const tb = $("mine"); tb.textContent = "";
   if (!shown.length) {
