@@ -8293,18 +8293,45 @@ function renderBudgets() {
       : `Applies to ${person ? person.name : ""} alone, over their group's and the organisation's.`;
   ed.appendChild(title);
 
+  /* The figure above is not this scope's figure.
+   *
+   * Every row on Groups and People carried the organisation's number twice -
+   * greyed inside the empty field as its placeholder, and spelled out beside
+   * the label as "inherits ₹1,00,000.00 from the organisation". Setting one
+   * budget at the top therefore appeared to write the same budget onto every
+   * group and every person on the account: nine types, ten people, the same
+   * ten numbers, all looking filled in.
+   *
+   * Nothing was ever written - `groups` and `people` are empty on the record -
+   * but a form that shows a number in a field is a form that has that number
+   * in it, whatever shade it is drawn in. And a budget page is read to answer
+   * "what is set", so the one question it must never make ambiguous is which
+   * of these limits somebody chose.
+   *
+   * So a scope with no limit of its own says exactly that, in the field and
+   * beside the label. What covers it is still true and is still said - once,
+   * at the top of the editor, where it is a fact about this scope rather than
+   * a value in ten of its inputs. */
+  const covered = budScope !== "org"
+    && budEditorLines(budScope).some(r => r.value == null && r.inherited != null);
+  if (covered) {
+    const from = document.createElement("p");
+    from.className = "hint"; from.style.margin = "0 0 8px";
+    from.textContent = "Nothing is set here. The limits above this level still "
+      + "apply — set a figure below only where this scope needs its own.";
+    ed.appendChild(from);
+  }
+
   budEditorLines(budScope).forEach(row => {
     const line = document.createElement("div"); line.className = "budline";
     const label = document.createElement("div"); label.className = "bl";
     label.innerHTML = esc(row.label) +
-      (row.value == null && row.inherited != null
-        ? `<span class="blfrom">inherits ${fmt(row.inherited, orgCurrency())} from the ${row.from}</span>`
-        : row.value == null ? `<span class="blfrom">no limit</span>` : "");
+      (row.value == null ? `<span class="blfrom">No limit</span>` : "");
 
     const input = document.createElement("input");
     input.type = "text"; input.inputMode = "decimal"; input.disabled = !rw;
     input.value = row.value == null ? "" : (row.value / 100).toFixed(2);
-    input.placeholder = row.inherited != null ? (row.inherited / 100).toFixed(2) : "no limit";
+    input.placeholder = "No limit";
     input.setAttribute("aria-label", `${row.label} budget`);
     input.addEventListener("change", () => {
       const rec = budRecord(budScope);
