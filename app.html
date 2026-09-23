@@ -11925,10 +11925,31 @@ function floatRow(m, ccy, columns) {
 /** The three figures and the ledger behind them, on My expenses. */
 function renderMyFloat() {
   const box = $("mine-float");
-  const held = myFloat();
   if (!box) return;
-  if (!held) { box.hidden = true; return; }
-  box.hidden = false;
+  const held = myFloat();
+  box.hidden = mineSection !== "float";
+
+  /* Nothing advanced to this reader, said plainly.
+   *
+   * Three dashes and an empty table would read as a fault. "No advance has
+   * been made to you" is a complete answer, and the sentence under it is the
+   * one people actually want: this is not something you ask for here. */
+  if (!held) {
+    $("mf-out").textContent = "—";
+    $("mf-flight").textContent = "—";
+    $("mf-hand").textContent = "—";
+    $("mf-out").style.color = "";
+    $("mf-hand").style.color = "";
+    $("mf-note").textContent = "No advance has been made to you. A float is "
+      + "cash your finance team hands out for spending on the company's "
+      + "behalf; if you need one, ask them.";
+    const empty = $("mine-float-log");
+    empty.textContent = "";
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="5" class="empty">Nothing recorded.</td>';
+    empty.appendChild(tr);
+    return;
+  }
 
   const ccy = held.currency || ADVANCES.currency || orgCurrency();
   const stillOut = advMinor(held.held);
@@ -11970,13 +11991,15 @@ function renderMineTabs(buckets) {
   const nav = $("m-subtabs"); if (!nav) return;
   nav.textContent = "";
   MINE_SECTIONS.forEach(([id, label]) => {
-    /* The float tab appears for somebody who has one, and for nobody else.
+    /* Drawn for everybody, including people who hold no advance.
      *
-     * Thirty-seven people on this account have never been handed cash, and a
-     * permanently empty tab reading "Advance" is a question they have to open
-     * once to find out has no answer. It appears when there is something to
-     * show and goes when there is not, which is what an advance does. */
-    if (id === "float" && !myFloat()) return;
+     * It appeared only for holders, on the reasoning that a permanently empty
+     * tab is a question somebody opens once to find has no answer. The
+     * argument is sound and the cost was not worth it: a tab that is
+     * sometimes there is a tab nobody learns they have, and the first person
+     * to be handed cash has no way of knowing where to look for it. An empty
+     * one says "no advance has been made to you", which is a real answer to a
+     * question people do ask. */
     const count = (buckets[id] || []).length;
     const b = document.createElement("button");
     b.type = "button";
@@ -12019,8 +12042,7 @@ function renderMine() {
    * settled and closed takes its tab with it, and a reader left standing on
    * the tab would otherwise get the claims table with nothing in it and an
    * empty-state sentence about claims they never filed. */
-  if (mineSection === "float" && !myFloat()) mineSection = "pending";
-  const onFloat = mineSection === "float" && myFloat();
+  const onFloat = mineSection === "float";
   const scroll = $("mine") ? $("mine").closest(".items-scroll") : null;
   if (scroll) scroll.hidden = !!onFloat;
   renderMyFloat();
