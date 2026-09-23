@@ -581,20 +581,6 @@ td.disp .yes { color:var(--ok); } td.disp .no { color:var(--bad); }
 #bw-list .track.over i { background:var(--bad); }
 #bw-list .pctn { font-family:"IBM Plex Mono",monospace; font-size:.68rem;
   font-variant-numeric:tabular-nums; color:var(--muted); width:36px; text-align:right; }
-/* The submitter's own view, above their receipts. */
-.mybud { display:flex; flex-wrap:wrap; gap:1px; background:var(--rule);
-  border:1px solid var(--rule); border-radius:var(--radius); overflow:hidden; }
-.mybud > div { flex:1 1 190px; background:var(--surface); padding:11px 13px;
-  display:flex; flex-direction:column; gap:5px; }
-.mybud .bl { font-family:"IBM Plex Mono",monospace; font-size:.62rem; text-transform:uppercase;
-  letter-spacing:.06em; color:var(--muted); }
-.mybud .bv { font-family:"IBM Plex Mono",monospace; font-size:.9rem; font-variant-numeric:tabular-nums; }
-.mybud .track { height:6px; border-radius:4px; background:var(--surface-2); overflow:hidden; }
-.mybud .track i { display:block; height:100%; background:var(--ok); }
-.mybud .near .track i, .mybud div.near .track i { background:var(--warn); }
-.mybud div.over .track i { background:var(--bad); }
-.mybud div.over .bv { color:var(--bad); }
-.mybud .bn { font-size:.7rem; color:var(--muted); }
 
 @media (max-width: 860px) {
   .budgrid { grid-template-columns:1fr; }
@@ -1853,8 +1839,6 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
 
   <!-- ================= STAFF ================= -->
   <div id="view-mine" style="display:none;flex-direction:column;gap:20px">
-    <section class="mybud" id="my-budget" hidden></section>
-
     <section class="panel">
       <header><h2>My expenses</h2><span class="sub" id="mine-sub"></span></header>
       <div class="banner" id="mine-banner"></div>
@@ -8428,48 +8412,48 @@ function renderBudgets() {
 
     line.append(label, input, used); ed.appendChild(line);
   });
+
+  /* What the "used" column had to do to somebody's money to count it.
+   *
+   * This sentence used to sit under the tiles above My expenses, explaining
+   * the figure there. Those tiles are gone - eleven of them, ten reading
+   * ₹0.00, above the thing the page is actually for - and the converted
+   * figure they explained now appears only here. The caveat goes where the
+   * number went: a budget kept in rupees counts a dollar receipt at the rate
+   * on the day, which is a comparison and not a payment, and a claim no rate
+   * could be had for is left out of the total rather than counted as nothing.
+   */
+  if (spend && (spend.converted || spend.other)) {
+    const note = document.createElement("p");
+    note.className = "hint"; note.style.margin = "8px 0 0";
+    note.textContent = (spend.converted
+      ? `${spend.converted} receipt${spend.converted === 1 ? "" : "s"} in another `
+        + `currency ${spend.converted === 1 ? "was" : "were"} converted to `
+        + `${spend.ccy} at the rate on the day, for this check only — `
+        + `${person ? person.name : "they"} ${spend.converted === 1 ? "is" : "are"} `
+        + `reimbursed in the currency spent. ` : "")
+      + (spend.other
+      ? `${spend.other} could not be converted, so ${spend.other === 1 ? "it is" : "they are"} `
+        + `not counted here.` : "");
+    ed.appendChild(note);
+  }
 }
 
-/** The employee's own budget, above their receipts. */
-function renderMyBudget() {
-  const box = $("my-budget"); if (!box) return;
-  const person = PEOPLE.find(p => p.name === currentUser.name);
-  const b = person && budgetLines(person);
-  box.textContent = "";
-  if (!b) {
-    box.hidden = true;
-    return;
-  }
-  box.hidden = false;
-  b.lines.forEach(l => {
-    const pct = l.limit > 0 ? Math.min(100, Math.round(l.spent / l.limit * 100))
-                            : (l.spent ? 100 : 0);
-    const d = document.createElement("div");
-    d.className = l.status;
-    d.innerHTML =
-      `<span class="bl">${esc(l.label)}</span>` +
-      `<span class="bv">${fmt(l.spent, b.ccy)} <span style="opacity:.55">/ ${fmt(l.limit, b.ccy)}</span></span>` +
-      `<span class="track"><i style="width:${pct}%"></i></span>` +
-      `<span class="bn">${l.status === "over" ? fmt(l.spent - l.limit, b.ccy) + " over"
-        : l.status === "near" ? fmt(l.limit - l.spent, b.ccy) + " left"
-        : fmt(l.limit - l.spent, b.ccy) + " left"} · ${l.count} receipt${l.count === 1 ? "" : "s"}</span>`;
-    box.appendChild(d);
-  });
-  const note = document.createElement("div");
-  note.innerHTML = `<span class="bl">${esc(b.periodLabel)}</span>`
-    + `<span class="bn">Counts everything you have submitted this ${b.period}, including `
-    + `anything still being reviewed. Going over never blocks a receipt — finance is told, `
-    + `and nothing you send is refused.`
-    + (b.converted ? ` ${b.converted} receipt${b.converted === 1 ? "" : "s"} in another `
-                 + `currency ${b.converted === 1 ? "was" : "were"} converted to ${b.ccy} at `
-                 + `the rate on the day, for this check only — you are reimbursed in the `
-                 + `currency you spent.` : "")
-    + (b.other ? ` ${b.other} receipt${b.other === 1 ? "" : "s"} in another currency could `
-                 + `not be converted, so ${b.other === 1 ? "it is" : "they are"} not counted `
-                 + `here.` : "")
-    + `</span>`;
-  box.appendChild(note);
-}
+/* No budget tiles above My expenses.
+ *
+ * Eleven of them, one per expense type, filling the screen before the thing
+ * the page is for: send a receipt, and see what happened to the ones you
+ * sent. Ten of the eleven read ₹0.00 against a limit, because one person does
+ * not spend under every category a company configures - so the first screen
+ * of the product was mostly zeroes, and the two rows that were not zeroes
+ * were an answer to a question nobody had opened this page to ask.
+ *
+ * Going over a budget never blocked a receipt and never will; finance is
+ * told. So this told a submitter something they could not act on, in the
+ * place where the thing they *can* do was pushed below the fold. The figures
+ * are still kept and still reported - under Budgets, where somebody whose job
+ * is watching them goes to look.
+ */
 
 let reportYear = today().getFullYear();
 let reportMonth = today().getMonth();   // -1 means the whole year
@@ -12718,7 +12702,6 @@ function renderAll() {
   else if (view === "channels") renderChannels();
   else if (view === "claim") { hostDetail("claim"); renderClaimPage(); }
   else if (view === "mine") {
-    renderMyBudget();
     renderMine();
     renderWhatsApp();
     if (!uploadWired) { wireUpload(); uploadWired = true; }
