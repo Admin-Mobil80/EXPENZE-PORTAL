@@ -11373,23 +11373,7 @@ function renderAdvances() {
     tr.innerHTML = '<td colspan="6" class="empty">No advance has been recorded.</td>';
     log.appendChild(tr);
   }
-  moves.forEach(m => {
-    const tr = document.createElement("tr");
-    const back = m.kind === "return";
-    tr.innerHTML =
-      `<td class="day">${esc(dayStamp(m.at * 1000))}</td>` +
-      `<td>${esc(m.holder_name || m.holder)}</td>` +
-      `<td><span class="state ${back ? "off" : "on"}">` +
-        `${back ? "handed back" : "advance"}</span>` +
-        (m.mode ? `<span class="gid" style="margin-left:7px">${esc(m.mode)}</span>` : "") +
-        (m.reference ? `<span class="refno inline">${esc(m.reference)}</span>` : "") +
-      `</td>` +
-      `<td class="n" style="color:${back ? "var(--muted)" : "var(--ok)"}">` +
-        `${back ? "\u2212" : "+"}${fmt(advMinor(m.amount), m.currency || ccy)}</td>` +
-      `<td>${esc(m.by)}</td>` +
-      `<td class="reason">${esc(m.note || "\u2014")}</td>`;
-    log.appendChild(tr);
-  });
+  moves.forEach(m => log.appendChild(floatRow(m, ccy, 6)));
 
   paintAdvanceForm();
 }
@@ -11887,6 +11871,44 @@ function myFloat() {
     h => String(h.email || "").toLowerCase() === me) || null;
 }
 
+/* One line of a float ledger, whichever of the three things it is.
+ *
+ * Cash out to the holder, cash handed back, and a claim settled against the
+ * advance. The third was missing: the log showed money going in and nothing
+ * coming out, so the balance under it could not be got to from the rows above
+ * it - and a ledger that does not reconcile is one somebody has to take on
+ * trust, which is the thing a ledger exists to avoid.
+ *
+ * Shared by the holder's own tab and the administration screen, because it is
+ * one ledger read by two people. The only difference is whose float it is,
+ * which the holder already knows.
+ */
+function floatRow(m, ccy, columns) {
+  const spent = m.kind === "spent";
+  const back = m.kind === "return";
+  const down = spent || back;
+  const tr = document.createElement("tr");
+  tr.innerHTML =
+    `<td class="day">${esc(dayStamp(m.at * 1000))}</td>` +
+    (columns > 5 ? `<td>${esc(m.holder_name || m.holder)}</td>` : "") +
+    `<td><span class="state ${down ? "off" : "on"}">` +
+      `${spent ? "spent" : back ? "handed back" : "advance"}</span>` +
+      // A drawdown is a claim, so it is named by what somebody would look up:
+      // the vendor it was paid to and the claim's own reference.
+      (spent && m.vendor
+        ? `<span class="gid" style="margin-left:7px">${esc(m.vendor)}</span>` : "") +
+      (!spent && m.mode
+        ? `<span class="gid" style="margin-left:7px">${esc(m.mode)}</span>` : "") +
+      (m.reference ? `<span class="refno inline">${esc(m.reference)}</span>` : "") +
+    `</td>` +
+    `<td class="n" style="color:${
+      spent ? "var(--warn)" : back ? "var(--muted)" : "var(--ok)"}">` +
+      `${down ? "\u2212" : "+"}${fmt(advMinor(m.amount), m.currency || ccy)}</td>` +
+    `<td>${esc(m.by)}</td>` +
+    `<td class="reason">${esc(m.note || "\u2014")}</td>`;
+  return tr;
+}
+
 /** The three figures and the ledger behind them, on My expenses. */
 function renderMyFloat() {
   const box = $("mine-float");
@@ -11928,22 +11950,7 @@ function renderMyFloat() {
     log.appendChild(tr);
     return;
   }
-  moves.forEach(m => {
-    const back = m.kind === "return";
-    const tr = document.createElement("tr");
-    tr.innerHTML =
-      `<td class="day">${esc(dayStamp(m.at * 1000))}</td>` +
-      `<td><span class="state ${back ? "off" : "on"}">` +
-        `${back ? "handed back" : "advance"}</span>` +
-        (m.mode ? `<span class="gid" style="margin-left:7px">${esc(m.mode)}</span>` : "") +
-        (m.reference ? `<span class="refno inline">${esc(m.reference)}</span>` : "") +
-      `</td>` +
-      `<td class="n" style="color:${back ? "var(--muted)" : "var(--ok)"}">` +
-        `${back ? "−" : "+"}${fmt(advMinor(m.amount), m.currency || ccy)}</td>` +
-      `<td>${esc(m.by)}</td>` +
-      `<td class="reason">${esc(m.note || "—")}</td>`;
-    log.appendChild(tr);
-  });
+  moves.forEach(m => log.appendChild(floatRow(m, ccy, 5)));
 }
 
 function renderMineTabs(buckets) {
