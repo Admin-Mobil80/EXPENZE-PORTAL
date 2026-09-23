@@ -11977,7 +11977,22 @@ function renderMyFloat() {
 
   const log = $("mine-float-log");
   log.textContent = "";
-  const moves = ADVANCES.movements || [];
+  /* This reader's movements, whoever the reader is.
+   *
+   * The server narrows the answer for anybody below finance, and this screen
+   * leaned on that - so it was right for a submitter and wrong for everybody
+   * who can see the whole float. An owner opening their own Advance tab got
+   * their own three figures over a ledger of the whole company's: four rows,
+   * one of them theirs, three of them cash handed to a colleague by somebody
+   * else. Worse than an empty tab, because it adds up to nothing and looks
+   * like it should.
+   *
+   * Narrowed here rather than by asking the server twice: this screen means
+   * "mine" for every role, which is a fact about the screen and not about
+   * who is reading it. */
+  const mine = String((LIVE && LIVE.email) || "").toLowerCase();
+  const moves = (ADVANCES.movements || []).filter(
+    m => !mine || String(m.holder || "").toLowerCase() === mine);
   if (!moves.length) {
     const tr = document.createElement("tr");
     tr.innerHTML = '<td colspan="5" class="empty">Nothing recorded yet.</td>';
