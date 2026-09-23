@@ -6363,7 +6363,39 @@ function renderDetail() {
    * expense it is, what it is denominated in, which cost centre it comes out
    * of. Those are needed for the claim to be paid and reported on, not for it
    * to be re-judged. */
-  if (unsaved && !classFrozen && !saving && !deciding) {
+  /* Which arm of the chain below is going to run, named once.
+   *
+   * It was eight `else if`s, and three separate bugs came out of code that had
+   * to re-derive which of them applied - a Save button on two arms and missing
+   * from the one finance stands on, most recently. Asking the question once
+   * and reading the answer is how the readers below stay in step with it.
+   */
+  const arm = deciding ? "deciding"
+            : saving ? "saving"
+            : (decision || settlementStage(sub)) ? "decided"
+            : agentMayRelease(sub) ? "agent"
+            : unread ? "unread"
+            : !mayReview ? "watching"
+            : isPaid(sub) ? "paid"
+            : "review";
+
+  /* No Save where the decision saves for you.
+   *
+   * Two buttons for one intention: set the expense type, press Save, wait,
+   * then press Approve. The first press records a fact nobody asked to record
+   * on its own - a reviewer changing a dropdown is on their way to approving,
+   * not filing a correction - and having to make it read as a step the product
+   * needed and the person did not.
+   *
+   * So on the reviewer's arm there is one button. Approve writes the answers
+   * and then decides, and it is greyed until there is something to write: the
+   * answers are what make the claim payable, and a claim approved without them
+   * is one finance cannot pay.
+   *
+   * Everywhere else Save stays, because nothing else on the claim page is a
+   * decision. A finance executive setting a cost centre from Pending
+   * settlement has only this button to record it with. */
+  if (unsaved && arm !== "review" && !classFrozen && !saving && !deciding) {
     const save = document.createElement("button");
     save.className = "btn primary"; save.type = "button";
     save.id = "retype-inline";
@@ -6383,7 +6415,7 @@ function renderDetail() {
     abox.appendChild(note);
   }
 
-  if (deciding) {
+  if (arm === "deciding") {
     /* The decision is being recorded, and nothing else is on offer.
      *
      * Not a disabled button with its old label on it: "Approve as reviewed",
@@ -6397,7 +6429,7 @@ function renderDetail() {
     s.append(dot, document.createTextNode("Recording your decision…"));
     s.setAttribute("role", "status");
     abox.appendChild(s);
-  } else if (saving) {
+  } else if (arm === "saving") {
     // A write, not a decision. It is quick and it changes nothing about the
     // claim except the facts the reviewer just supplied, but the buttons go
     // while it is in flight so nothing is decided against a half-saved claim.
@@ -6408,7 +6440,7 @@ function renderDetail() {
     s.append(dot, document.createTextNode("Saving…"));
     s.setAttribute("role", "status");
     abox.appendChild(s);
-  } else if (decision || settlementStage(sub)) {
+  } else if (arm === "decided") {
     const s = document.createElement("span"); s.className="stamp";
     const stageNow = settlementStage(sub);
     /* A refusal reads as a refusal.
@@ -6518,7 +6550,7 @@ function renderDetail() {
         () => openReasonForm(sub, "settle_rejected", "Rejected"));
       abox.appendChild(no);
     }
-  } else if (agentMayRelease(sub)) {
+  } else if (arm === "agent") {
     const s = document.createElement("span"); s.className="stamp";
     // No longer has a "your correction released it" arm. A corrected claim
     // never reaches here now - `agentMayRelease` sends it back to the queue for
@@ -6557,7 +6589,7 @@ function renderDetail() {
         () => openReasonForm(sub, "settle_rejected", "Rejected"));
       abox.appendChild(no);
     }
-  } else if (unread) {
+  } else if (arm === "unread") {
     /* The agent has not finished reading it.
      *
      * There are no figures, no line items and no verdict - the panel above
@@ -6570,7 +6602,7 @@ function renderDetail() {
     s4.textContent = "Still being read. There is nothing to decide until the "
       + "agent has finished — the figures and the verdict appear on their own.";
     abox.appendChild(s4);
-  } else if (!mayReview) {
+  } else if (arm === "watching") {
     const s2 = document.createElement("span"); s2.className="stamp pending";
     /* Said differently depending on who is reading it.
      *
@@ -6595,7 +6627,7 @@ function renderDetail() {
 
     // Somewhere for finance to put a re-tagged claim: the Save button is above
     // the whole chain now, so this arm needs no copy of its own.
-  } else if (isPaid(sub)) {
+  } else if (arm === "paid") {
     // Reimbursed. There is nothing left to decide, and offering Approve or
     // Reject over a payment somebody has already received invites an action
     // that cannot be true - the server refuses it, but it should not have been
@@ -6614,31 +6646,17 @@ function renderDetail() {
     // with no cap behind it, no exclusion applied, and no rule anybody could
     // point at afterwards to say why that amount was right. The server refuses
     // it; this says so before the click rather than after.
-    /* An unsaved change is not a change.
+    /* The dropdowns are read, not the record.
      *
-     * Everything above this - the figures, the findings, the expense type in
-     * the dropdown - is a *preview* the moment a reviewer touches a control.
-     * The server holds the verdict it last computed, and approving decides
-     * money against that one, not against the preview.
+     * A reviewer who has just picked Canteen groceries can see it on screen,
+     * so a button that refuses on the type is arguing with them about a claim
+     * they are looking at. The answers in front of them are the answers; the
+     * press writes them down and then decides, in that order, as one act.
      *
-     * So setting the type to Canteen groceries and pressing Approve was
-     * refused with "Set an expense type first. Nothing in your policy covers
-     * this claim" - which is true of the claim on file and reads as nonsense
-     * to somebody who has just set the type and can see it on screen. The
-     * screen was showing one claim and the button was deciding another.
-     *
-     * Approve waits for Save and re-check. Reject and Ask do not: refusing a
-     * claim or asking about it decides nothing against a cap, so they are
-     * honest whatever is in the dropdown.
+     * Reject is not gated on any of it. Refusing a claim charges nothing to a
+     * cost centre and files nothing under a type, so it is honest whatever is
+     * in the dropdowns - and a reviewer must always be able to refuse a bill.
      */
-    /* And Approve waits for a cost centre, for the same reason it waits for a
-     * type: the claim cannot be attributed without one, and an unattributed
-     * payment is money out of a budget nobody named. Where it was the reason
-     * the claim came here at all, approving past it would leave the question
-     * that stopped the agent unanswered by the person it was handed to.
-     *
-     * Reject is always offered. Refusing a claim needs no cost centre, since
-     * nothing is being charged to one. */
     /* Every claim is approved under an expense type this organisation has
      * configured. No exceptions.
      *
@@ -6665,68 +6683,76 @@ function renderDetail() {
      * Reject is the honest button, and the other way out is off this screen
      * entirely - a clearer photograph, submitted again. */
     const unreadable = res.violations.some(v => v.code === "nothing_read");
-    /* Approve waits for an unsaved edit and for a receipt nobody could read.
-     * It does not wait for the expense type or the cost centre.
+    /* The cost centre, asked of the dropdown rather than of the record.
      *
-     * It used to wait for both, and that put the requirement in the wrong
-     * place. Approving is a judgment about whether the company owes this
-     * money; the type and the group are about how the payment is filed, and
-     * filing is finance's job. A reviewer who had read the bill and decided
-     * it was legitimate was being stopped by two dropdowns that say nothing
-     * about that decision - on a queue where eighteen of twenty claims were
-     * missing one of them.
+     * `needsGroup` above reads `groupOf(sub).id`, the group the server holds,
+     * which is the right question for the line that reports what is missing.
+     * It is the wrong one for a button that has to come alive the moment
+     * somebody picks a group, because nothing has been written down yet at
+     * that point - that is the whole idea.
      *
-     * The requirement moved rather than went: a settlement is refused
-     * without both, so nothing can be paid, and therefore nothing reported,
-     * under a missing type or an unnamed cost centre. `unsaved` and
-     * `unreadable` stay, because neither is about filing - one is an edit
-     * that has not reached the server, the other is a claim with no amount
-     * in it to approve. */
-    const choices = (unsaved || unreadable)
-      ? [["Reject","danger","Rejected"]]
-      : [["Approve as reviewed","primary","Approved"],
-         ["Reject","danger","Rejected"]];
+     * An organisation running no cost centres is not missing one. */
+    const groupsExist = ((ORG_PROFILE.groups || []).length > 0);
+    const chosenGroup = ("group" in w) ? String(w.group || "")
+                                       : String(sub.groupId || "");
+    const groupOk = !groupsExist || !!chosenGroup;
 
-    // The Save button is drawn above the chain, before this arm runs, so it
-    // still sits to the left of Approve and Reject.
+    /* Greyed, not withheld.
+     *
+     * The gate was removed from this screen once, on the argument that
+     * approving is a judgment about whether the company owes the money while
+     * the type and the cost centre are about how the payment is filed. That
+     * was right about what the two things mean and wrong about where it left
+     * everybody: claims went through the queue untagged, and finance - who
+     * cannot pay one without both - had to set them itself, on a screen where
+     * it could not see the bill being described.
+     *
+     * A disabled button is the version that costs the reviewer nothing. It
+     * does not refuse a decision they have made; it says the claim is not
+     * finished, with the two controls that finish it directly above it, and
+     * it comes alive as soon as they are answered. Nothing to save, nothing
+     * to come back to.
+     */
+    const blockers = [
+      unreadable && "nothing was read off this receipt, so there is no amount "
+                  + "to approve",
+      !typeOk && "no expense type is set",
+      !groupOk && "no cost centre is set",
+    ].filter(Boolean);
 
-    choices.forEach(([label,cls,action]) => {
+    [["Approve as reviewed","primary","Approved", blockers.length],
+     ["Reject","danger","Rejected", false]].forEach(([label,cls,action,off]) => {
       const b = document.createElement("button");
       b.className = "btn" + (cls?" "+cls:""); b.type="button"; b.textContent = label;
-      b.addEventListener("click", () => decide(sub, action, b));
+      if (off) {
+        b.disabled = true;
+        // Why, on the button itself. A greyed control with the reason three
+        // lines away is a control that looks broken.
+        b.title = "Not yet — " + blockers.join(", and ") + ".";
+      } else {
+        b.addEventListener("click", () => decide(sub, action, b));
+      }
       abox.appendChild(b);
     });
     const s = document.createElement("span"); s.className="stamp pending";
-    // The unsaved case first: a reviewer who has just set the type is told to
-    // save it, not told to set it. Being given back an instruction you have
-    // visibly already followed is how a product loses somebody's trust in
-    // everything else it says.
-    //
-    // The change itself is named beside the Save button above, which is drawn
-    // for every reader of the claim page; this arm adds the half that is only
-    // true of a reviewer - that Approve is waiting on it.
-    s.textContent = unsaved
-      ? "Save it before approving."
-      : unreadable
+    s.textContent = unreadable
       // Named before the expense type, because on a claim with no figures the
       // type is not the thing standing in the way.
       ? "Nothing was read off this receipt, so there is no amount to approve. "
         + "Reject it and ask for a clearer photograph of the same bill."
-      // Said as what is still outstanding rather than as something stopping
-      // the decision, because it no longer stops it. Finance cannot pay a
-      // claim missing either, so saying so here saves them coming back - but
-      // a reviewer who knows the bill is good can approve it and move on.
-      : (!typeOk || needsGroup)
-      ? (!typeOk && needsGroup
-         ? "No expense type and no cost centre yet. You can still approve it; "
-           + "finance cannot pay it until both are set."
+      // Said as the thing to do next, in the order the controls sit in above.
+      : (!typeOk || !groupOk)
+      ? (!typeOk && !groupOk
+         ? "Set the expense type and the cost centre above to approve it."
          : !typeOk
-         ? "No expense type yet. You can still approve it; finance cannot pay "
-           + "it until one is set."
-         : "No cost centre yet. You can still approve it; finance cannot pay "
-           + "it until one is set.")
+         ? "Set the expense type above to approve it."
+         : "Set the cost centre above to approve it.")
+      // Approve writes the answers down on its way through, so a reviewer is
+      // never told to save something first.
+      : unsaved
+      ? `Approving records your changes · ${currentUser.name} · ${currentUser.role}`
       : `Deciding as ${currentUser.name} · ${currentUser.role}`;
-    if (unsaved || unreadable || !typeOk || needsGroup) s.style.color = "var(--warn)";
+    if (unreadable || !typeOk || !groupOk) s.style.color = "var(--warn)";
     abox.appendChild(s);
     // Not blocked - a sole owner with nobody else to ask would never be paid -
     // but said out loud. The claim records who decided it, and "the same
@@ -7608,6 +7634,50 @@ async function decide(sub, action, button, opts) {
   if (!reason && server === "rejected") {
     openReasonForm(sub, "rejected", action);
     return;
+  }
+
+  /* One press, two writes.
+   *
+   * A reviewer who sets the expense type is on their way to approving the
+   * claim, not filing a correction - so Save was a step the product needed
+   * and the person did not, sitting between them and the only thing they came
+   * to do. It is gone from that screen, and the answers ride in on the
+   * approval: recorded first, because the server decides against what is
+   * written down rather than against what is on screen, and then decided.
+   *
+   * Approving only. Rejecting a claim charges nothing to a cost centre and
+   * files nothing under a type, so there is nothing to write - and a failed
+   * write must never be able to stop somebody refusing a bill.
+   */
+  if (server === "approved" && !isPristine(sub, workingCopy(sub))) {
+    /* Set before the write and *not* rendered on.
+     *
+     * Held from here so the row is frozen for the whole press: `saveAnswers`
+     * renders on its way through, and without this the buttons come back live
+     * across its `loadRecords`, where a second click is a second decision on
+     * the same claim.
+     *
+     * Rendering here would undo the thing being saved. Freezing the row
+     * disables the three dropdowns, and `saveAnswers` sends only the controls
+     * that are enabled - deliberately, so nobody posts a field they could not
+     * edit - so a render before it reads them turns the reviewer's group and
+     * currency into "not sent". It reads them first and renders after, which
+     * is what makes this safe: the flag is picked up by *its* render, one line
+     * later, with the values already in hand.
+     */
+    decidingOf = sub.id;
+    const saved = await saveAnswers({ silent: true });
+    if (!saved) {
+      // The failure is already on screen, in the same line a Save would have
+      // put it in. Nothing is decided against answers that did not land, and
+      // the row comes back so the reviewer can try again.
+      decidingOf = null;
+      renderAll();
+      return;
+    }
+    // `loadRecords` rebuilt the list, so the row this was called with is a
+    // copy of something that no longer exists.
+    sub = SUBMISSIONS.find(s => s.id === sub.id) || sub;
   }
 
   /* Held from the press to the last render, not just across the write.
@@ -12706,9 +12776,20 @@ let answerMsgFor = null;
 // when the reader moves to another one. See `renderDetail`.
 let payMsgFor = null;
 
-async function saveAnswers() {
+/* `silent` is the approval calling in.
+ *
+ * Same write, same validation, same failure line - what it drops is the
+ * "Saved: Courier. Approve or reject it when you are ready." that follows a
+ * successful one, because on that path the reviewer has already approved it
+ * and is being told to do the thing they just did.
+ *
+ * Returns whether the answers reached the server, so the caller can decline
+ * to decide against answers that did not land.
+ */
+async function saveAnswers(opts) {
+  const silent = !!(opts && opts.silent);
   const sub = SUBMISSIONS.find(s => s.id === selectedId);
-  if (!sub || savingOf) return;
+  if (!sub || savingOf) return false;
   const chosen = $("etype").value;
   /* Only the controls this reader actually holds are sent.
    *
@@ -12735,7 +12816,8 @@ async function saveAnswers() {
     answerMsgFor = sub.id;
   };
   if (!rules.types.some(t => t.enabled && t.id === chosen)) {
-    return show("Pick one of your configured expense types.", false);
+    show("Pick one of your configured expense types.", false);
+    return false;
   }
 
   /* Confirmed when the claim had no type at all.
@@ -12802,16 +12884,22 @@ async function saveAnswers() {
   savingOf = null;
   renderAll();
 
-  if (!ok) return show(data.error || "Could not save the change.", false);
+  if (!ok) {
+    show(data.error || "Could not save the change.", false);
+    return false;
+  }
   await loadRecords();
   renderAll();
-  show(chosenCcy
-       ? `Saved: ${label0} in ${chosenCcy}. Approve or reject it when you are ready.`
-       // Finance's version: they are not being asked to decide anything, so
-       // "approve or reject it when you are ready" is an instruction they
-       // cannot follow.
-       : `Saved: ${label0}. It is reported under that from now on.`,
-       true);
+  if (!silent) {
+    show(chosenCcy
+         ? `Saved: ${label0} in ${chosenCcy}. Approve or reject it when you are ready.`
+         // Finance's version: they are not being asked to decide anything, so
+         // "approve or reject it when you are ready" is an instruction they
+         // cannot follow.
+         : `Saved: ${label0}. It is reported under that from now on.`,
+         true);
+  }
+  return true;
 }
 
 $("retype-go").addEventListener("click", saveAnswers);
