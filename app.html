@@ -6315,6 +6315,74 @@ function renderDetail() {
     abox.appendChild(wd);
   }
 
+  /* One Save button, outside the branches.
+   *
+   * There were two, and they were in two arms of the chain below - the
+   * reviewer's, and the one a finance executive reaches on a claim nobody has
+   * decided. Every other arm had none. So a finance executive opening a
+   * *decided* claim from Pending settlement - which is the only place they
+   * open claims from - got a live Group dropdown, changed it, and had nothing
+   * to record it with: the pick sat in the working copy, the server never
+   * heard about it, and Record a payment stayed hidden behind the cost centre
+   * it still believed was unset. Setting the group appeared to do nothing.
+   *
+   * That is the third time this shape of bug has shipped, each time on a
+   * different arm of this chain, which is the argument for the button not
+   * living on an arm of it at all. A control that is editable anywhere needs
+   * somewhere to be saved everywhere.
+   *
+   * `classFrozen` is the same expression that decides whether those dropdowns
+   * are editable in the first place, so the button is offered exactly when
+   * there is something it could record - and the two busy arms below own the
+   * row while a write or a decision is in flight.
+   */
+  const unsaved = !isPristine(sub, w);
+  // Names the change, rather than announcing that one exists. "You have
+  // unsaved changes" makes a reviewer hunt for what they touched; "Expense
+  // type → Canteen groceries, not saved yet" is the same sentence with the
+  // hunting removed.
+  const pending = [
+    w.type !== (sub.type || "meals")
+      ? `Expense type → ${(findType(w.type) || {}).label || w.type}` : "",
+    w.currency !== (sub.currency || orgCurrency())
+      ? `Currency → ${w.currency}` : "",
+    ("group" in w) && (w.group || "") !== (sub.groupId || "")
+      ? `Group → ${w.group ? groupLabel(w.group) : "none"}` : "",
+  ].filter(Boolean).join(" · ");
+
+  /* Save, and nothing more.
+   *
+   * This button was "Save and re-check", and it sent the claim back round the
+   * policy engine under the new type. A claim that has reached a person is
+   * decided by that person: they read the bill, the findings and the figures,
+   * and they approve or reject. Nothing re-decides it in between, so there is
+   * nothing to wait for and no second verdict to reconcile with the one on
+   * screen.
+   *
+   * What this writes down is what the agent could not answer - what kind of
+   * expense it is, what it is denominated in, which cost centre it comes out
+   * of. Those are needed for the claim to be paid and reported on, not for it
+   * to be re-judged. */
+  if (unsaved && !classFrozen && !saving && !deciding) {
+    const save = document.createElement("button");
+    save.className = "btn primary"; save.type = "button";
+    save.id = "retype-inline";
+    // Drawn from the flag, so whichever button is on screen after a render
+    // shows the truth. The state cannot live on the element: the element in
+    // flight is not the element that comes back.
+    save.disabled = savingOf === sub.id;
+    save.textContent = savingOf === sub.id ? "Saving…" : "Save";
+    save.title = "Record the expense type, currency and group on this "
+      + "claim. It is not re-judged; approving or rejecting it is yours.";
+    save.addEventListener("click", saveAnswers);
+    abox.appendChild(save);
+    const note = document.createElement("span");
+    note.className = "stamp pending";
+    note.style.color = "var(--warn)";
+    note.textContent = (pending || "Unsaved change") + " — not saved yet.";
+    abox.appendChild(note);
+  }
+
   if (deciding) {
     /* The decision is being recorded, and nothing else is on offer.
      *
@@ -6525,29 +6593,8 @@ function renderDetail() {
       : "In review. You will hear the outcome by email and WhatsApp.";
     abox.appendChild(s2);
 
-    /* Somewhere for finance to put a re-tagged claim.
-     *
-     * The Save button lives in the reviewer's branch, which a finance
-     * executive never reaches - so the expense type control would have come
-     * alive under them, accepted a change, and offered nothing to record it
-     * with. That is the group bug again: a dropdown that moves and a record
-     * that does not. */
-    if (!isPristine(sub, w) && !classFrozen) {
-      const save = document.createElement("button");
-      save.className = "btn primary"; save.type = "button";
-      save.disabled = savingOf === sub.id;
-      save.textContent = savingOf === sub.id ? "Saving…" : "Save";
-      save.title = "Record the expense type on this claim. Nothing else about "
-        + "it changes, and it is not re-judged.";
-      save.addEventListener("click", saveAnswers);
-      abox.appendChild(save);
-      const note = document.createElement("span");
-      note.className = "stamp pending";
-      note.style.color = "var(--warn)";
-      note.textContent = `Expense type → ${(findType(w.type) || {}).label || w.type}`
-        + " — not saved yet.";
-      abox.appendChild(note);
-    }
+    // Somewhere for finance to put a re-tagged claim: the Save button is above
+    // the whole chain now, so this arm needs no copy of its own.
   } else if (isPaid(sub)) {
     // Reimbursed. There is nothing left to decide, and offering Approve or
     // Reject over a payment somebody has already received invites an action
@@ -6592,8 +6639,6 @@ function renderDetail() {
      *
      * Reject is always offered. Refusing a claim needs no cost centre, since
      * nothing is being charged to one. */
-    const unsaved = !isPristine(sub, w);
-
     /* Every claim is approved under an expense type this organisation has
      * configured. No exceptions.
      *
@@ -6642,33 +6687,8 @@ function renderDetail() {
       : [["Approve as reviewed","primary","Approved"],
          ["Reject","danger","Rejected"]];
 
-    /* Save, and nothing more.
-     *
-     * This button was "Save and re-check", and it sent the claim back round
-     * the policy engine under the new type. A claim that has reached a person
-     * is decided by that person: they read the bill, the findings and the
-     * figures, and they approve or reject. Nothing re-decides it in between,
-     * so there is nothing to wait for and no second verdict to reconcile with
-     * the one on screen.
-     *
-     * What this writes down is what the agent could not answer - what kind of
-     * expense it is, what it is denominated in, which cost centre it comes
-     * out of. Those are needed for the claim to be paid and reported on, not
-     * for it to be re-judged. */
-    if (unsaved) {
-      const save = document.createElement("button");
-      save.className = "btn primary"; save.type = "button";
-      save.id = "retype-inline";
-      // Drawn from the flag, so whichever button is on screen after a render
-      // shows the truth. The state cannot live on the element: the element in
-      // flight is not the element that comes back.
-      save.disabled = savingOf === sub.id;
-      save.textContent = savingOf === sub.id ? "Saving…" : "Save";
-      save.title = "Record the expense type, currency and group on this "
-        + "claim. It is not re-judged; approving or rejecting it is yours.";
-      save.addEventListener("click", saveAnswers);
-      abox.appendChild(save);
-    }
+    // The Save button is drawn above the chain, before this arm runs, so it
+    // still sits to the left of Approve and Reject.
 
     choices.forEach(([label,cls,action]) => {
       const b = document.createElement("button");
@@ -6681,22 +6701,12 @@ function renderDetail() {
     // save it, not told to set it. Being given back an instruction you have
     // visibly already followed is how a product loses somebody's trust in
     // everything else it says.
-    // Names the change, rather than announcing that one exists. "You have
-    // unsaved changes" makes a reviewer hunt for what they touched; "Expense
-    // type → Canteen groceries, not saved yet" is the same sentence with the
-    // hunting removed.
-    const pending = [
-      w.type !== (sub.type || "meals")
-        ? `Expense type → ${(findType(w.type) || {}).label || w.type}` : "",
-      w.currency !== (sub.currency || orgCurrency())
-        ? `Currency → ${w.currency}` : "",
-      ("group" in w) && (w.group || "") !== (sub.groupId || "")
-        ? `Group → ${w.group ? groupLabel(w.group) : "none"}` : "",
-    ].filter(Boolean).join(" · ");
-
+    //
+    // The change itself is named beside the Save button above, which is drawn
+    // for every reader of the claim page; this arm adds the half that is only
+    // true of a reviewer - that Approve is waiting on it.
     s.textContent = unsaved
-      ? (pending ? `${pending} — not saved yet. ` : "Unsaved change. ")
-        + "Save it before approving."
+      ? "Save it before approving."
       : unreadable
       // Named before the expense type, because on a claim with no figures the
       // type is not the thing standing in the way.
