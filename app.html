@@ -1909,7 +1909,14 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
 
     <section class="tiles4">
       <div><span class="k">Receipts</span><span class="v" id="r-count"></span><span class="note" id="r-count-note"></span></div>
-      <div><span class="k">Auto-clear rate</span><span class="v ok" id="r-rate"></span><span class="note">Reviewed with no human involved.</span></div>
+      <!-- No auto-clear rate here. It was on this strip and in Intake &
+           triage, one scroll apart, reading 69% and 20% about the same
+           seventy-one receipts - and this was the wrong one, counting every
+           claim a person read and approved under a note that said "reviewed
+           with no human involved". It is asked once now, in the report whose
+           subject it is, where the three counts that produce it sit beside
+           it and a reader can check the arithmetic. This strip is what was
+           claimed and what has been paid. -->
       <div><span class="k">Claimed</span><span class="v" id="r-claimed"></span><span class="note" id="r-claimed-note"></span></div>
       <!-- Named for the state a claim is in rather than for a property of it.
            "Reimbursable" is an adjective - it describes money that could be
@@ -4936,14 +4943,16 @@ function renderIntake() {
 
 function renderTriage() {
   const period = SUBMISSIONS.filter(inPeriod);
-  const total = Math.max(1, period.length);
   const queued = period.filter(isQueued).length;
   const inPeriodDecision = (id) => period.some(s => s.id === id);
   const mine = Object.entries(decisions)
     .filter(([id, d]) => d.by === currentUser.name && inPeriodDecision(id)).length;
   const decided = Object.keys(decisions).filter(inPeriodDecision).length;
-  const cleared = period.length - queued - decided;
-  const rate = Math.round(cleared/total*100);
+  // Asked of each claim rather than worked out by subtraction. "Everything not
+  // queued and not decided" counted a companion document, and a claim still
+  // being read, as work the agent had cleared.
+  const cleared = period.filter(autoCleared).length;
+  const rate = autoClearRate(period);
   $("t-cleared").textContent = cleared;
   $("t-queued").textContent = queued;
   $("t-resolved").textContent = mine;
@@ -7764,6 +7773,32 @@ function claimStage(sub) {
   return { stage:"approved", ...cleared };
 }
 
+/* The auto-clear rate, asked in one place.
+ *
+ * It was on screen three times under two different definitions, and the two
+ * that disagreed sat one scroll apart: 69% in the headline strip and 20% in
+ * Intake & triage, about the same seventy-one receipts.
+ *
+ * 20% was the true one. 69% was `stage in (approved, part_settled, settled)`
+ * over the total - which is the *cleared* rate, counting every claim a person
+ * read and approved as though nobody had been involved, under a tile that
+ * said "Reviewed with no human involved". The By expense type column had the
+ * same bug, so two of the three readings were answering a different question
+ * from the one they were labelled with.
+ *
+ * `claimStage` has always known the difference - it stamps `kind` as "agent"
+ * or "human" on the claim it clears - and none of the three asked it. So this
+ * is that field, named, and it is the only way the question gets asked now.
+ *
+ * It is stricter than the subtraction the triage tile used, which was
+ * "everything not queued and not decided" and therefore swept in a companion
+ * document and any claim still being read - neither of which the agent
+ * cleared, because neither is a claim anybody is being paid for.
+ */
+const autoCleared = (sub) => claimStage(sub).kind === "agent";
+const autoClearRate = (subs) =>
+  subs.length ? Math.round(subs.filter(autoCleared).length / subs.length * 100) : 0;
+
 /* ---------- reports ---------- */
 
 /* Reports count in the organisation's own currency, converted at the rate
@@ -8624,7 +8659,6 @@ function renderByMonth() {
 function renderEmptyPeriod() {
   $("r-count").textContent = "0";
   $("r-count-note").textContent = `${periodLabel()}, all channels.`;
-  $("r-rate").textContent = "—";
   $("r-claimed").textContent = "—";
   $("r-claimed-note").textContent = `Nothing recorded in ${periodLabel()}.`;
   $("rp-reimb").textContent = "—";
@@ -8704,10 +8738,8 @@ function renderReports() {
   const sum = (list, f) => list.reduce((t, r) => t + f(r), 0);
 
   // ---- headline ----
-  const cleared = rows.filter(r => ["approved","part_settled","settled"].includes(r.stage)).length;
   $("r-count").textContent = rows.length;
   $("r-count-note").textContent = `${periodLabel()}, all channels.`;
-  $("r-rate").textContent = Math.round(cleared / rows.length * 100) + "%";
 
   /* The three money tiles are one figure split three ways, and they are meant
      to be read as such: what was claimed is what is waiting on a person, plus
@@ -8763,14 +8795,13 @@ function renderReports() {
   const types = [...new Set(rows.map(r => r.type))];
   types.map(t => {
     const all = rows.filter(r => r.type === t);
-    const auto = all.filter(r => ["approved","part_settled","settled"].includes(r.stage)).length;
     const rule = rules.types.find(x => x.id === t);
     return {
       label: rule ? rule.label : t + " (no rule)",
       count: all.length,
       claimed: sum(all, r => r.claimed),
       settled: sum(all, r => r.settled),
-      auto: Math.round(auto / all.length * 100),
+      auto: autoClearRate(all.map(r => r.sub)),
     };
   }).sort((a, b) => b.claimed - a.claimed).forEach(t => {
     const tr = document.createElement("tr");
