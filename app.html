@@ -1956,7 +1956,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
 
     <div class="rsec" id="rsec-summary">
     <section class="panel">
-      <header><h2>Intake</h2><span class="sub"><span id="total-count"></span> receipts &middot; settled in <span id="intake-ccy"></span></span></header>
+      <header><h2>Intake</h2><span class="sub"><span id="total-count"></span> receipts<span id="intake-extra" hidden></span> &middot; settled in <span id="intake-ccy"></span></span></header>
       <div class="intake" id="intake"></div>
     </section>
 
@@ -4413,6 +4413,28 @@ const agentMayRelease = (sub) =>
  * pay. */
 const isCompanion = (sub) => !!sub.companionOf;
 
+/* The claims, out of the documents.
+ *
+ * Reports counted both. Pending settlement counted one — `payableClaims` has
+ * always skipped a companion, because paying the invoice and then paying its
+ * own receipt is paying twice — so the two screens disagreed by exactly
+ * ₹8,819.23 about what the company owed: Reports said ₹51,412.19 pending,
+ * the payment run said ₹42,592.96, and the difference was Mobil80-Exp-19, the
+ * second document of Exp-18.
+ *
+ * That is the same ₹8,819.23 that made the float ledger report money
+ * outstanding with nothing pending. One purchase, counted twice, in the two
+ * places nobody had asked the question - which is the argument for asking it
+ * once, here, rather than in each reader that happens to remember.
+ *
+ * Everything on the Reports tab goes through this. The receipt count included:
+ * a tab whose money covers seventy claims and whose headline says
+ * seventy-one receipts is the same disagreement one line higher up. What did
+ * arrive is still said, beside the intake breakdown, where arrivals are the
+ * subject.
+ */
+const claimsOnly = (subs) => subs.filter(sub => !isCompanion(sub));
+
 /* Every document of one purchase: the claim, then whatever arrived with it.
  *
  * An invoice and its receipt are both wanted in the record - the invoice is
@@ -4922,8 +4944,25 @@ function renderIntake() {
   const box = $("intake"); box.textContent = "";
   // Scoped to the chosen period like everything else on this tab - a channel
   // mix that silently spans fourteen months answers no question anyone asked.
-  const period = SUBMISSIONS.filter(inPeriod);
+  const arrived = SUBMISSIONS.filter(inPeriod);
+  const period = claimsOnly(arrived);
   $("total-count").textContent = period.length;
+  /* The documents that arrived and were not claims, said only here.
+   *
+   * Everything else on this tab counts claims, so the headline count has to
+   * as well or the tab disagrees with itself one line above its own money.
+   * But this panel is about what came in, by which route, and a second
+   * document *did* come in - it cost a credit, which was returned. Naming it
+   * in the one place arrivals are the subject is how the count can be
+   * seventy here and seventy in the tiles without anything going missing. */
+  const extra = arrived.length - period.length;
+  const note = $("intake-extra");
+  if (note) {
+    note.hidden = !extra;
+    note.textContent = extra
+      ? ` · ${extra} second document${extra === 1 ? "" : "s"} of a claim already counted`
+      : "";
+  }
   const ccyLabel = $("intake-ccy");
   if (ccyLabel) ccyLabel.textContent = orgCurrency();
   Object.entries(CHANNELS).forEach(([key,label]) => {
@@ -4942,7 +4981,7 @@ function renderIntake() {
 }
 
 function renderTriage() {
-  const period = SUBMISSIONS.filter(inPeriod);
+  const period = claimsOnly(SUBMISSIONS.filter(inPeriod));
   const queued = period.filter(isQueued).length;
   const inPeriodDecision = (id) => period.some(s => s.id === id);
   const mine = Object.entries(decisions)
@@ -7824,7 +7863,7 @@ const autoClearRate = (subs) =>
  * had. It is counted nowhere and named, rather than being summed in at zero. */
 function analysed() {
   const home = orgCurrency();
-  return SUBMISSIONS.map(sub => {
+  return claimsOnly(SUBMISSIONS).map(sub => {
     const res = evaluate(sub);
     const w = workingCopy(sub);
     const ccy = String(res.currency || "").toUpperCase();
