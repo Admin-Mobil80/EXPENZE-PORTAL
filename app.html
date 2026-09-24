@@ -11664,7 +11664,18 @@ function renderAdvances() {
       `<td class="n" style="color:${advMinor(h.pending) ? "var(--warn)" : "inherit"}">` +
         `${advMinor(h.pending) ? fmt(advMinor(h.pending), hccy) : "\u2014"}</td>` +
       `<td class="n" style="color:${tone};font-weight:600">${fmt(inHand, hccy)}</td>` +
-      `<td class="day">${h.last_at ? esc(agoOf(h.last_at * 1000)) : "\u2014"}</td>`;
+      /* Seconds, not milliseconds.
+       *
+       * This passed `h.last_at * 1000` into a function whose whole body is
+       * `Date.now() / 1000 - seconds`, so every row was subtracting a number
+       * about a thousand times too large, getting a negative, and hitting
+       * `Math.max(1, mins)` - which is why the column read "1m ago" against
+       * every holder, including movements from yesterday.
+       *
+       * `at` is in seconds. `floatRow` two hundred lines up multiplies it by
+       * a thousand because `dayStamp` takes a Date, and that is right there
+       * and wrong here. */
+      `<td class="day">${h.last_at ? esc(agoOf(h.last_at)) : "\u2014"}</td>`;
     tb.appendChild(tr);
   });
 
@@ -12016,6 +12027,18 @@ function renderApiKey(secret) {
 function agoOf(seconds) {
   if (!seconds) return "";
   const mins = Math.floor((Date.now() / 1000 - seconds) / 60);
+  /* A timestamp in the future is not a duration.
+   *
+   * `Math.max(1, mins)` existed so that something recorded eight seconds ago
+   * reads "1m ago" rather than "0m ago", and it quietly did the same for a
+   * value a thousand times too large - so passing milliseconds into a
+   * function that wants seconds produced "1m ago" on every row instead of
+   * anything that looked wrong. Saying nothing is the honest answer to a time
+   * we cannot place, and it is the one somebody notices.
+   *
+   * The grace is for a viewer's clock running a little fast, which is
+   * ordinary and is not what this is guarding against. */
+  if (mins < -5) return "";
   if (mins < 60) return `${Math.max(1, mins)}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 48) return `${hrs}h ago`;
