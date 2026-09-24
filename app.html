@@ -2096,6 +2096,11 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
                something to find four columns in. The receipt date is blank
                where the bill was illegible on that point rather than filled
                with a guess. -->
+          <!-- Ticking the rows, like the review queue. The filter narrows to
+               one person; this picks which of their claims go into this
+               transfer, which is not the same question - three of somebody's
+               seven receipts is an ordinary thing to pay. -->
+          <th scope="col" class="pick" id="pay-pick-head"></th>
           <th scope="col">Submitted</th>
           <th scope="col">Receipt date</th>
           <th scope="col">Submitter</th><th scope="col">Vendor</th><th scope="col">Cleared by</th>
@@ -9630,6 +9635,33 @@ function payableClaims() {
   return out;
 }
 
+/* Which claims are ticked for one transfer.
+ *
+ * The submitter filter narrows the list to one person; this picks which of
+ * that person's claims go into this payment, and those are different
+ * questions. Paying three of somebody's seven receipts is an ordinary thing
+ * to do - the other four are missing a cost centre, or belong to next month's
+ * run, or are simply not being paid today - and without a picker the only
+ * offer was all of them or one at a time.
+ *
+ * Emptied when the rows leave the list, for the same reason the queue empties
+ * its own: a selection somebody cannot see is one they cannot check before
+ * moving money.
+ */
+const payPicked = new Set();
+
+/* One transfer goes to one person.
+ *
+ * So the selection has a submitter, taken from whatever is already in it, and
+ * everybody else's rows go dead while it does. Refusing the tick with the
+ * reason on it beats letting somebody build a mixed selection and telling
+ * them at the end, and it beats silently clearing what they had.
+ */
+function payPickedWho(claims) {
+  const first = claims.find(c => payPicked.has(c.sub.id));
+  return first ? String(first.sub.who || "") : "";
+}
+
 function renderPayments() {
   const claims = payableClaims();
   /* One narrowing, above everything that reads the list.
@@ -9662,6 +9694,30 @@ function renderPayments() {
    *
    * Hidden rather than disabled when there is nothing: a greyed button on an
    * empty list invites somebody to work out what is wrong with it. */
+  /* The select-all box, built once and kept.
+   *
+   * In the header cell rather than above the table, so it sits over the
+   * column it selects - the same place the review queue puts its own. */
+  const pickHead = $("pay-pick-head");
+  if (pickHead && !$("pay-all") && can.seeQueue()) {
+    const all = document.createElement("input");
+    all.type = "checkbox"; all.id = "pay-all";
+    all.addEventListener("change", () => {
+      const list = payableClaims().filter(c => c.outstanding > 0 && matchesWho(c)
+                                               && !payBlocker(c.sub));
+      const who = payPickedWho(list) || (() => {
+        const names = new Set(list.map(c => String(c.sub.who || "")));
+        return names.size === 1 ? [...names][0] : "";
+      })();
+      const mine = who ? list.filter(c => String(c.sub.who || "") === who) : [];
+      if (all.checked) mine.forEach(c => payPicked.add(c.sub.id));
+      else mine.forEach(c => payPicked.delete(c.sub.id));
+      batchOpen = false;
+      renderPayments();
+    });
+    pickHead.appendChild(all);
+  }
+
   const printAll = $("pay-print");
   if (printAll) {
     // `can.seeQueue()`, not `settlingHere()`: that one asks about a claim
@@ -9706,10 +9762,29 @@ function renderPayments() {
    * the form, so nobody can mistake this for having paid everything.
    */
   const payees = new Set(awaiting.map(c => String(c.sub.who || "")));
-  const ready = awaiting.filter(c => !payBlocker(c.sub));
+  const payableNow = awaiting.filter(c => !payBlocker(c.sub));
   const held = awaiting.filter(c => payBlocker(c.sub));
+
+  // A claim that has been paid, or scrolled out of the filter, is not on
+  // screen - and a tick nobody can see is one nobody can check.
+  const onScreen = new Set(payableNow.map(c => c.sub.id));
+  [...payPicked].forEach(id => { if (!onScreen.has(id)) payPicked.delete(id); });
+
+  const pickedWho = payPickedWho(awaiting);
+  const chosen = payableNow.filter(c => payPicked.has(c.sub.id));
+
+  /* The selection wins over the filter.
+   *
+   * With nothing ticked this behaves as it always has: a list narrowed to one
+   * person settles that person's payable claims together. Tick some, and it
+   * settles exactly those - which is the whole point of the boxes, and is why
+   * the count on the button is the count of what is ticked.
+   */
   const onePayee = payees.size === 1 && awaiting.length > 1;
-  const batchable = onePayee && ready.length > 1 && can.seeQueue();
+  const ready = chosen.length ? chosen : payableNow;
+  const heldNow = chosen.length ? [] : held;
+  const batchable = can.seeQueue()
+    && (chosen.length > 1 || (!chosen.length && onePayee && payableNow.length > 1));
 
   const batchBtn = $("pay-batch");
   if (batchBtn) {
@@ -9717,14 +9792,18 @@ function renderPayments() {
     const owed = ready.reduce((t, c) => t + c.outstanding, 0);
     const payCcy = orgCurrency();
     batchBtn.textContent = batchOpen ? "Cancel"
-      : held.length
+      // Ticked rows are an explicit choice, so the button says what was
+      // chosen rather than measuring it against the list.
+      : chosen.length
+      ? `Settle ${chosen.length} selected as one payment\u2026`
+      : heldNow.length
       // The count says both numbers, so "settle together" on a filtered list
       // cannot be read as "settle everything of theirs".
       ? `Settle ${ready.length} of ${awaiting.length} as one payment\u2026`
       : `Settle ${ready.length} claims as one payment\u2026`;
     batchBtn.title = batchable
-      ? `One transfer of ${fmt(owed, payCcy)} to ${[...payees][0]}, recorded `
-        + `against ${ready.length} claims.`
+      ? `One transfer of ${fmt(owed, payCcy)} to `
+        + `${pickedWho || [...payees][0]}, recorded against ${ready.length} claims.`
       : "";
     batchBtn.onclick = () => { batchOpen = !batchOpen; renderPayments(); };
   }
@@ -9736,11 +9815,21 @@ function renderPayments() {
   const batchWhy = $("pay-batch-why");
   if (batchWhy) {
     batchWhy.hidden = !(can.seeQueue() && !batchable && awaiting.length > 1);
+    /* A selection answers this line before the filter does.
+     *
+     * Once somebody has ticked a row, "filter by submitter" and "none of
+     * these can be paid" are both answers to a question they have moved past.
+     * What they need to know is that one claim is not a batch, and how to
+     * start again if they ticked the wrong person. */
     batchWhy.textContent =
-      !onePayee
-      ? `These claims are ${payees.size} people's. Filter by submitter to `
-        + "settle one person's together — a transfer goes to somebody."
-      : ready.length === 1
+      chosen.length === 1
+      ? `One claim selected. Tick another of ${pickedWho}'s to pay them `
+        + "together, or settle this one on its own row — untick it to choose "
+        + "somebody else."
+      : !onePayee
+      ? `These claims are ${payees.size} people's. Tick the rows you are `
+        + "paying, or filter by submitter — a transfer goes to somebody."
+      : payableNow.length === 1
       ? "Only one of these can be paid yet; the rest need an expense type or "
         + "a cost centre. Settle it on its own row."
       : "None of these can be paid yet — each needs an expense type or a cost "
@@ -9752,7 +9841,7 @@ function renderPayments() {
   if (slot) {
     slot.textContent = "";
     if (batchable && batchOpen) {
-      slot.appendChild(batchForm(ready, orgCurrency(), held));
+      slot.appendChild(batchForm(ready, orgCurrency(), heldNow));
     }
   }
   const part = claims.filter(c => c.paid > 0 && c.outstanding > 0);
@@ -9808,7 +9897,7 @@ function renderPayments() {
     // The width follows the header, which is one narrower with nothing part
     // paid - an empty row that spans the wrong number sits under the wrong
     // columns.
-    tr.innerHTML = `<td colspan="${anyPartPaid ? 9 : 7}" class="empty">`
+    tr.innerHTML = `<td colspan="${anyPartPaid ? 10 : 8}" class="empty">`
       + (findWho
          ? `Nobody matching &ldquo;${esc(findWho)}&rdquo; is owed anything. `
            + `${awaitingAll.length} claim${awaitingAll.length === 1 ? " is" : "s are"} `
@@ -9851,7 +9940,26 @@ function renderPayments() {
     const billed = dayStamp(c.sub.receiptDate);
 
     opensClaim(tr, c.sub.id);
+    /* The tick, and why it is sometimes dead.
+     *
+     * Two reasons, and each carries its own: a claim missing an expense type
+     * or a cost centre cannot be paid at all, and a claim belonging to
+     * somebody other than whoever is already ticked cannot go into *this*
+     * transfer. A box that can be ticked on a claim the payment would refuse
+     * is a box that lies.
+     */
+    const why = payBlocker(c.sub)
+      || (pickedWho && String(c.sub.who || "") !== pickedWho
+          ? `A transfer goes to one person. ${esc(pickedWho)} is already `
+            + "selected — clear the selection to pay somebody else."
+          : "");
     tr.innerHTML =
+      `<td class="pick">` + (can.seeQueue()
+        ? `<input type="checkbox" data-pay="${esc(c.sub.id)}"`
+          + (why ? " disabled" : "")
+          + (payPicked.has(c.sub.id) ? " checked" : "")
+          + ` title="${esc(why || "Pay this one with the others in one transfer")}">`
+        : "") + `</td>` +
       `<td class="day">${esc(dayStamp(c.sub.date))}</td>` +
       `<td class="day">${billed ? esc(billed)
                                 : '<span class="undated">not printed</span>'}</td>` +
@@ -9883,10 +9991,42 @@ function renderPayments() {
     const tr = document.createElement("tr");
     tr.className = "listtotal";
     tr.innerHTML =
-      `<td colspan="${anyPartPaid ? 8 : 6}">${awaiting.length}`
+      `<td colspan="${anyPartPaid ? 9 : 7}">${awaiting.length}`
       + `${awaiting.length === 1 ? " claim" : " claims"} owed</td>`
       + `<td class="out">${fmt(owedTotal, base)}</td>`;
     tb.appendChild(tr);
+  }
+  // Delegated after the rows are built, because they are rebuilt on every
+  // render and a listener per row would be re-added with them.
+  tb.querySelectorAll("input[data-pay]").forEach(cb => {
+    cb.addEventListener("click", (e) => {
+      e.stopPropagation();                 // the row itself opens the claim
+      if (cb.checked) payPicked.add(cb.dataset.pay);
+      else payPicked.delete(cb.dataset.pay);
+      // Closed on a change of selection: the open form describes the claims
+      // that were ticked when it was drawn, and leaving it up over a
+      // different set is a form about a payment nobody is making.
+      batchOpen = false;
+      renderPayments();
+    });
+  });
+
+  /* Select-all, over one person's payable claims.
+   *
+   * Which person: whoever is already ticked, or - with nothing ticked and the
+   * list narrowed to one - that one. On a mixed list with nothing ticked it
+   * is dead, because "select all" across three people is three transfers and
+   * there is no honest thing for it to do.
+   */
+  const payAll = $("pay-all");
+  if (payAll) {
+    const who = pickedWho || (payees.size === 1 ? [...payees][0] : "");
+    const mine = who ? payableNow.filter(c => String(c.sub.who || "") === who) : [];
+    payAll.disabled = !mine.length;
+    payAll.checked = !!mine.length && mine.every(c => payPicked.has(c.sub.id));
+    payAll.title = mine.length
+      ? `Select every claim of ${who}'s that can be paid`
+      : "Filter by submitter, or tick one row, to select a person's claims";
   }
   wireClaimRows(tb);
 }
