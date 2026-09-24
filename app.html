@@ -1724,13 +1724,14 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
           <span class="route" id="detail-route"></span>
         </div>
         <div class="controls">
-          <!-- What it is, then what it cost. Expense type leads because it is
-               the answer the rest depends on: it selects the cap the claim is
-               measured against, and it is the only classification that changes
-               what anybody is paid. -->
-          <div class="field"><label for="etype">Expense type</label><select id="etype"></select></div>
-          <div class="field"><label for="ccy">Currency</label><select id="ccy"></select></div>
-          <!-- Which cost centre this comes out of.
+          <!-- Who pays for it, then what it is, then what it cost.
+               Expense type used to lead, on the argument that it selects the
+               cap the claim is measured against. True, and not the order the
+               questions get asked in: whose budget this comes out of is the
+               first thing a reviewer settles, and the type is how that budget
+               reports it. Widest scope first, narrowest last.
+
+               Which cost centre this comes out of.
                The agent reads it off the bill where the bill says - a buyer's
                tax registration, or the buyer's name - and otherwise leaves it
                open and sends the claim here. It was only settable at
@@ -1742,6 +1743,8 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
           <div class="field" id="group-field" hidden>
             <label for="claim-group">Group</label><select id="claim-group"></select>
           </div>
+          <div class="field"><label for="etype">Expense type</label><select id="etype"></select></div>
+          <div class="field"><label for="ccy">Currency</label><select id="ccy"></select></div>
           <!-- The Save control lives in the decision row with Approve and
                Reject, which is where a reviewer is looking once they have used
                these. It was in both places for a while, which is one control
