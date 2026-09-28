@@ -3715,8 +3715,21 @@ function toClaim(s) {
     // One entry, reconstructed from the row. Part settlements record only the
     // latest figure server-side, so the console shows what is paid in total
     // rather than a history it cannot honestly produce.
+    /* No currency on the reconstructed payment.
+     *
+     * This carried `s.currency`, which is the currency the *bill* was written
+     * in, against `s.paid`, which is what left the bank. Those are the same
+     * thing only on a rupee receipt. On the others the settlement log printed
+     * a rupee figure under a dollar sign - Anthropic at "$14,778.17" when the
+     * bill was $153.88 and the transfer was ₹14,778.17 - which is neither
+     * number and is out by a factor of ninety.
+     *
+     * There is nothing to put here instead: every payout leaves in the
+     * organisation's own currency, which is why `payable` hard-codes it and
+     * why the in-session record takes `claim.payCcy`. So the field goes, and
+     * the one line that reads it falls back to the organisation's. */
     settlement: s.outcome === "settled" && s.paid
-      ? { amount: money(s.paid), ccy: s.currency || "", by: s.paid_by || "",
+      ? { amount: money(s.paid), ccy: "", by: s.paid_by || "",
           at: s.paid_at ? new Date(s.paid_at * 1000)
                 .toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "",
           ref: "Recorded", mode: s.paid_mode || "", txn: s.paid_reference || "",
@@ -10293,7 +10306,9 @@ function renderSettled() {
     row.innerHTML =
       `<span class="ver">${e.at}</span>` +
       `<span class="what">${e.ref} &mdash; ${e.sub.who}, ${e.sub.vendor}${how}${txn}${note}</span>` +
-      `<span class="amt-c plus">${fmt(e.amount, e.ccy)} &middot; ${esc(personName(e.by))}</span>`;
+      // Every payout leaves in the organisation's own currency. `e.ccy` is set
+      // only where a record genuinely carries one of its own.
+      `<span class="amt-c plus">${fmt(e.amount, e.ccy || orgCurrency())} &middot; ${esc(personName(e.by))}</span>`;
     lg.appendChild(row);
   });
 }
