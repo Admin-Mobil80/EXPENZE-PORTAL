@@ -2150,7 +2150,8 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
         <span class="note" id="adv-held-note"></span></div>
       <div><span class="k">Advanced in total</span><span class="v" id="adv-paid"></span>
         <span class="note">Cash handed over, less anything given back.</span></div>
-      <div><span class="k">In flight</span><span class="v" id="adv-gap"></span>
+      <!-- Drawn only when there is something in it, like the column below. -->
+      <div id="adv-gap-tile" hidden><span class="k">In flight</span><span class="v" id="adv-gap"></span>
         <span class="note">Spent by a holder and not yet settled.</span></div>
     </section>
 
@@ -2160,21 +2161,33 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <div class="items-scroll">
         <table><thead><tr>
           <th scope="col">Holder</th>
+          <!-- What they are actually carrying, and it leads.
+               "Still out" sat here too - advanced less returned less settled
+               from it - and the two are the same number whenever nothing is
+               in flight, which is nearly always. Two columns printing one
+               figure under two names invites a reader to hunt for a
+               difference that is not there.
+               In hand is the one that survives, because it is the question
+               somebody has: can this person still buy next week's groceries.
+               Still out is in hand plus in flight, and is on the tile above
+               where it is the company's exposure rather than a person's
+               balance. -->
+          <th scope="col" style="text-align:right">In hand</th>
           <th scope="col" style="text-align:right">Advanced</th>
           <!-- Claims settled against the advance. Not claims *paid* - a
                separate payout reimburses them without touching the float, and
                folding the two together is how a replenishment gets
                calculated against a balance that never moved. -->
           <th scope="col" style="text-align:right">Settled from it</th>
-          <th scope="col" style="text-align:right">Still out</th>
-          <!-- Spent and not yet settled. The cash has left their hands and
-               the advance has not been drawn down for it, so it sits between
-               the two figures rather than inside either. -->
-          <th scope="col" style="text-align:right">In flight</th>
-          <!-- Still out less what is in flight. A worst case while claims are
-               undecided, since none of them has been assigned to the float
-               yet - it settles as finance chooses. -->
-          <th scope="col" style="text-align:right">In hand</th>
+          <!-- Spent and not yet settled: the cash has left their hands and the
+               advance has not been drawn down for it.
+               Drawn only when somebody has some. It is not irrelevant - it is
+               exactly the gap between in hand and still out, so dropping it
+               would leave in hand moving for a reason nothing on screen
+               explains - but on an organisation that settles promptly it is a
+               column of dashes, and a column of dashes is a column of nothing.
+               The same rule the payments list uses for its Paid column. -->
+          <th scope="col" style="text-align:right" id="adv-flight-head" hidden>In flight</th>
           <th scope="col">Last movement</th>
         </tr></thead><tbody id="adv-list"></tbody></table>
       </div>
@@ -11719,7 +11732,12 @@ function renderAdvances() {
     ? "Handed over and not yet accounted for by a settled claim."
     : "Nobody holds a float yet.";
   $("adv-paid").textContent = holders.length ? fmt(advanced, ccy) : "—";
+  /* And the tile goes with the column. A permanent ₹0.00 taking a quarter of
+   * the row is the same tile this page already removed once for the same
+   * reason. It comes back the moment there is something in flight. */
   $("adv-gap").textContent = holders.length ? fmt(flight, ccy) : "—";
+  const gapTile = $("adv-gap-tile");
+  if (gapTile) gapTile.hidden = !flight;
 
   $("adv-banner").innerHTML = rw
     ? `<strong>Recording as ${currentUser.name}.</strong><span>Logging an advance `
@@ -11727,7 +11745,8 @@ function renderAdvances() {
       + `claim settled <em>from the float</em> draws it down and moves no `
       + `money; one settled as a separate payout reimburses them and leaves `
       + `the float alone. Still out = advanced \u2212 returned \u2212 settled `
-      + `from it.</span>`
+      + `from it; in hand is that less anything spent and waiting to be `
+      + `settled.</span>`
     : `<strong>Read-only.</strong><span>The float is a Finance Executive's to record.</span>`;
 
   const actions = $("adv-actions");
@@ -11737,10 +11756,21 @@ function renderAdvances() {
     ? `${holders.length} ${holders.length === 1 ? "person holds" : "people hold"} cash \u00b7 ${ccy}`
     : "nobody holds cash";
 
+  /* In flight appears when somebody has some, and not otherwise.
+   *
+   * It is the gap between what a holder is carrying and what the company has
+   * out to them, so it is never irrelevant - drop it and `in hand` moves for
+   * a reason nothing on screen explains. But on an organisation that settles
+   * promptly every row reads "—", and a column of dashes takes width from the
+   * figures beside it that do say something. */
+  const anyFlight = holders.some(h => advMinor(h.pending) > 0);
+  const flightHead = $("adv-flight-head");
+  if (flightHead) flightHead.hidden = !anyFlight;
+
   const tb = $("adv-list"); tb.textContent = "";
   if (!holders.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="7" class="empty">Nobody holds a float. '
+    tr.innerHTML = `<td colspan="${anyFlight ? 6 : 5}" class="empty">Nobody holds a float. `
       + 'Record an advance below and they appear here.</td>';
     tb.appendChild(tr);
   }
@@ -11768,12 +11798,13 @@ function renderAdvances() {
     tr.innerHTML =
       `<td><div class="pname">${esc(h.name || h.email)}</div>` +
         `<div class="pmeta">${esc(h.email)}</div></td>` +
+      `<td class="n" style="color:${tone};font-weight:600">${fmt(inHand, hccy)}</td>` +
       `<td class="n">${fmt(advMinor(h.advanced) - advMinor(h.returned), hccy)}</td>` +
       `<td class="n">${fmt(advMinor(h.from_float), hccy)}</td>` +
-      `<td class="n">${fmt(stillOut, hccy)}</td>` +
-      `<td class="n" style="color:${advMinor(h.pending) ? "var(--warn)" : "inherit"}">` +
-        `${advMinor(h.pending) ? fmt(advMinor(h.pending), hccy) : "\u2014"}</td>` +
-      `<td class="n" style="color:${tone};font-weight:600">${fmt(inHand, hccy)}</td>` +
+      (anyFlight
+        ? `<td class="n" style="color:${advMinor(h.pending) ? "var(--warn)" : "inherit"}">` +
+          `${advMinor(h.pending) ? fmt(advMinor(h.pending), hccy) : "\u2014"}</td>`
+        : "") +
       /* Seconds, not milliseconds.
        *
        * This passed `h.last_at * 1000` into a function whose whole body is
