@@ -2150,8 +2150,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
         <span class="note" id="adv-held-note"></span></div>
       <div><span class="k">Advanced in total</span><span class="v" id="adv-paid"></span>
         <span class="note">Cash handed over, less anything given back.</span></div>
-      <!-- Drawn only when there is something in it, like the column below. -->
-      <div id="adv-gap-tile" hidden><span class="k">In flight</span><span class="v" id="adv-gap"></span>
+      <div><span class="k">In flight</span><span class="v" id="adv-gap"></span>
         <span class="note">Spent by a holder and not yet settled.</span></div>
     </section>
 
@@ -2180,14 +2179,16 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
                calculated against a balance that never moved. -->
           <th scope="col" style="text-align:right">Settled from it</th>
           <!-- Spent and not yet settled: the cash has left their hands and the
-               advance has not been drawn down for it.
-               Drawn only when somebody has some. It is not irrelevant - it is
-               exactly the gap between in hand and still out, so dropping it
-               would leave in hand moving for a reason nothing on screen
-               explains - but on an organisation that settles promptly it is a
-               column of dashes, and a column of dashes is a column of nothing.
-               The same rule the payments list uses for its Paid column. -->
-          <th scope="col" style="text-align:right" id="adv-flight-head" hidden>In flight</th>
+               advance has not been drawn down for it. It is exactly the gap
+               between in hand and still out, so without it in hand moves for
+               a reason nothing on screen explains.
+               Always drawn, and zero is written as a figure rather than a
+               dash. It was hidden while empty, on the argument that a column
+               of dashes takes width from figures that say something - but a
+               reader cannot ask about a column that is not there, and on this
+               account it would have been absent every day so far. A nought is
+               an answer; an absence is not. -->
+          <th scope="col" style="text-align:right">In flight</th>
           <th scope="col">Last movement</th>
         </tr></thead><tbody id="adv-list"></tbody></table>
       </div>
@@ -11747,12 +11748,9 @@ function renderAdvances() {
     ? "Handed over and not yet accounted for by a settled claim."
     : "Nobody holds a float yet.";
   $("adv-paid").textContent = holders.length ? fmt(advanced, ccy) : "—";
-  /* And the tile goes with the column. A permanent ₹0.00 taking a quarter of
-   * the row is the same tile this page already removed once for the same
-   * reason. It comes back the moment there is something in flight. */
+  // And the tile with it, for the same reason: a figure nobody can find is
+  // worse than a figure that reads nought.
   $("adv-gap").textContent = holders.length ? fmt(flight, ccy) : "—";
-  const gapTile = $("adv-gap-tile");
-  if (gapTile) gapTile.hidden = !flight;
 
   $("adv-banner").innerHTML = rw
     ? `<strong>Recording as ${currentUser.name}.</strong><span>Logging an advance `
@@ -11771,21 +11769,10 @@ function renderAdvances() {
     ? `${holders.length} ${holders.length === 1 ? "person holds" : "people hold"} cash \u00b7 ${ccy}`
     : "nobody holds cash";
 
-  /* In flight appears when somebody has some, and not otherwise.
-   *
-   * It is the gap between what a holder is carrying and what the company has
-   * out to them, so it is never irrelevant - drop it and `in hand` moves for
-   * a reason nothing on screen explains. But on an organisation that settles
-   * promptly every row reads "—", and a column of dashes takes width from the
-   * figures beside it that do say something. */
-  const anyFlight = holders.some(h => advMinor(h.pending) > 0);
-  const flightHead = $("adv-flight-head");
-  if (flightHead) flightHead.hidden = !anyFlight;
-
   const tb = $("adv-list"); tb.textContent = "";
   if (!holders.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="${anyFlight ? 6 : 5}" class="empty">Nobody holds a float. `
+    tr.innerHTML = '<td colspan="6" class="empty">Nobody holds a float. '
       + 'Record an advance below and they appear here.</td>';
     tb.appendChild(tr);
   }
@@ -11816,10 +11803,11 @@ function renderAdvances() {
       `<td class="n" style="color:${tone};font-weight:600">${fmt(inHand, hccy)}</td>` +
       `<td class="n">${fmt(advMinor(h.advanced) - advMinor(h.returned), hccy)}</td>` +
       `<td class="n">${fmt(advMinor(h.from_float), hccy)}</td>` +
-      (anyFlight
-        ? `<td class="n" style="color:${advMinor(h.pending) ? "var(--warn)" : "inherit"}">` +
-          `${advMinor(h.pending) ? fmt(advMinor(h.pending), hccy) : "\u2014"}</td>`
-        : "") +
+      // Amber only when there is something to look at; a nought is a fact,
+      // not a warning, and it is written as a figure so the column reads as
+      // an answer rather than as missing data.
+      `<td class="n" style="color:${advMinor(h.pending) ? "var(--warn)" : "var(--muted)"}">` +
+        `${fmt(advMinor(h.pending), hccy)}</td>` +
       /* Seconds, not milliseconds.
        *
        * This passed `h.last_at * 1000` into a function whose whole body is
