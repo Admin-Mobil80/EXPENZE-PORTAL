@@ -6129,7 +6129,22 @@ function renderDetail() {
    * engine, because both of them decide the amount; that is what Save and
    * re-check is, and it re-audits rather than trusting the browser. The group
    * decides nothing, so it saves on its own. */
-  const paid = isPaid(sub) || closed;
+  /* And a claim nobody is waiting on any more.
+   *
+   * `closed` above is `settlementStage`, which is the *settlement* ending -
+   * settled, part settled, refused at payment. A reviewer's rejection is not
+   * one of those, so a claim rejected in the review queue kept every control
+   * live and kept offering Save: Mobil80-Exp-84 sat there saying "Rejected -
+   * nothing further is needed here" above a live Expense type dropdown and a
+   * Save button, with "Cafe Management - not saved yet" beside it. Nothing
+   * further was needed and the row was still asking for it.
+   *
+   * `isClosed` is the rule the rest of this console already uses for an
+   * ending of any kind - settled, rejected, withdrawn - and naming it here
+   * rather than listing the endings again is what stops the next ending being
+   * forgotten. It is the same fix the Withdraw guard needed, in the one other
+   * place that had to know. */
+  const paid = isPaid(sub) || closed || isClosed(sub);
   /* Being saved. Not being re-decided - nothing re-decides a claim that has
    * reached a person. See `saveAnswers`. */
   const saving = savingOf === sub.id;
