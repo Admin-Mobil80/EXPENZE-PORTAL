@@ -2238,11 +2238,15 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <header><h2>Rejected</h2><span class="sub" id="rej-sub"></span></header>
       <div class="items-scroll">
         <table><thead><tr>
+          <!-- The date leads, as it does on every other list here and for the
+               same reason: it is what this list is ordered by, and a sort key
+               at the right-hand edge reads as no sort at all. "When" was also
+               the vaguest heading on the page - when what happened. -->
+          <th scope="col">Rejected on</th>
           <th scope="col">Submitter</th><th scope="col">Vendor</th>
           <th scope="col">Rejected by</th>
           <th scope="col">Reason given</th>
           <th scope="col" style="text-align:right">Claimed</th>
-          <th scope="col">When</th>
         </tr></thead><tbody id="rejlist"></tbody></table>
       </div>
     </section>
@@ -10135,6 +10139,24 @@ function renderSettledTabs() {
  * reason is the column that matters - it is what the submitter was told, word
  * for word, and the only thing that makes the rejection reviewable.
  */
+/* When a claim was refused, whoever refused it.
+ *
+ * A claim can be turned down twice over in this product, by two people at two
+ * moments: a reviewer decides the company does not owe it, and that is
+ * stamped in `review.at`; finance, holding a cleared claim, declines to pay
+ * it - "the bill never arrived", "the paper does not match" - and that is
+ * stamped in `rejectedAt`, off the settlement outcome.
+ *
+ * The list sorted and dated on the first alone, so every claim refused at the
+ * settlement stage showed an em dash in the date column and sank to the
+ * bottom of a list that is meant to be in order of what happened last.
+ *
+ * `Math.max` rather than a preference between them: they are two stamps on
+ * one claim and the question is when it was last refused.
+ */
+const rejectedInstant = (sub) =>
+  Math.max(Number((sub.review || {}).at || 0), Number(sub.rejectedAt || 0));
+
 function renderRejected() {
   const rejected = SUBMISSIONS.filter(sub => claimStage(sub).stage === "rejected");
   const shown = rejected.filter(sub => inSettledRange(sub));
@@ -10152,14 +10174,16 @@ function renderRejected() {
     tb.appendChild(tr);
     return;
   }
-  shown.sort((a, b) => ((b.review || {}).at || 0) - ((a.review || {}).at || 0));
+  shown.sort((a, b) => rejectedInstant(b) - rejectedInstant(a));
   shown.forEach(sub => {
     const res = evaluate(sub);
     const d = decisions[sub.id] || {};
     const rev = sub.review || {};
     const tr = document.createElement("tr");
     opensClaim(tr, sub.id);
+    const at = rejectedInstant(sub);
     tr.innerHTML =
+      `<td class="day">${esc(at ? dayStamp(at * 1000) : "\u2014")}</td>` +
       `<td>${esc(sub.who)}</td>` +
       `<td class="vend">${esc(sub.vendor)}${channelTag(sub.ch)}` +
         (sub.reference ? `<span class="refno inline">${esc(sub.reference)}</span>` : "") +
@@ -10168,8 +10192,7 @@ function renderRejected() {
       // What the submitter was told, word for word. Without it a rejection is
       // a fact nobody can review.
       `<td class="reason">${esc(d.reason || rev.reason || "No reason recorded")}</td>` +
-      `<td class="amt">${fmt(res.receiptTotal, res.currency)}</td>` +
-      `<td class="day">${esc(rev.at ? dayStamp(new Date(rev.at * 1000).toISOString()) : "—")}</td>`;
+      `<td class="amt">${fmt(res.receiptTotal, res.currency)}</td>`;
     tb.appendChild(tr);
   });
   wireClaimRows(tb);
