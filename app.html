@@ -2210,10 +2210,18 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <header><h2>Settled claims</h2><span class="sub" id="done-sub"></span></header>
       <div class="items-scroll">
         <table><thead><tr>
+          <!-- The date leads, as it does on every other list here.
+               It is what this tab is sorted by and what somebody scanning it
+               is looking for - "when was this paid" - and it was last, sharing
+               a cell with who recorded it and how. A sort key the eye has to
+               travel to the right-hand edge to find reads as no sort at all.
+               Who and how stay together at the end, where they are the audit
+               detail rather than the thing being looked up. -->
+          <th scope="col">Settled on</th>
           <th scope="col">Submitter</th><th scope="col">Vendor</th><th scope="col">Cleared by</th>
           <th scope="col" style="text-align:right">Approved</th>
           <th scope="col" style="text-align:right">Paid</th>
-          <th scope="col">Settled</th>
+          <th scope="col">Recorded by</th>
         </tr></thead><tbody id="donelist"></tbody></table>
       </div>
     </section>
@@ -10202,7 +10210,9 @@ function renderSettled() {
   const tb = $("donelist"); tb.textContent = "";
   if (!done.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="6" class="empty">${all.length
+    // Seven, since the settled date became a column of its own. A row that
+    // spans the wrong number sits under the wrong columns.
+    tr.innerHTML = `<td colspan="7" class="empty">${all.length
       ? "Nothing settled in this period. Widen it above."
       : "Nothing settled yet. Claims appear here once paid in full."}</td>`;
     tb.appendChild(tr);
@@ -10223,7 +10233,15 @@ function renderSettled() {
     const parts = (settlements[c.sub.id] || []).length;
     const tr = document.createElement("tr");
     opensClaim(tr, c.sub.id);
+    /* The stamp rather than the string beside it.
+     *
+     * `last.at` is already formatted - "17 Sep" - and is what this cell used
+     * to print. `settledInstant` is the number the list is sorted by, so
+     * formatting that is how the column and the order cannot disagree. It
+     * falls back to the string for demo history, which has no stamp. */
+    const at = settledInstant(c.sub, last);
     tr.innerHTML =
+      `<td class="day">${esc(at ? dayStamp(at * 1000) : (last.at || ""))}</td>` +
       `<td>${c.sub.who}</td>` +
       `<td class="vend">${esc(c.sub.vendor)}${channelTag(c.sub.ch)}` +
         (c.sub.reference ? `<span class="refno inline">${esc(c.sub.reference)}</span>` : "") +
@@ -10238,7 +10256,9 @@ function renderSettled() {
               c.rate ? ` at ${esc(c.rate)}` : ""}</span>` : "") +
       `</td>` +
       `<td class="amt">${fmt(c.paid, ccy)}${parts > 1 ? `<br><span class="ident">${parts} payments</span>` : ""}</td>` +
-      `<td class="ident">${last.at || ""} &middot; ${last.by || ""}${last.mode ? ` &middot; ${last.mode}` : ""}</td>`;
+      // The date has moved to the front, so this is who recorded the payment
+      // and how - not a second printing of when.
+      `<td class="ident">${esc(personName(last.by || ""))}${last.mode ? ` &middot; ${esc(last.mode)}` : ""}</td>`;
     tb.appendChild(tr);
   });
   wireClaimRows(tb);
