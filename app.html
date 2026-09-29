@@ -1902,9 +1902,17 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
            about one. -->
       <div class="items-scroll" id="mine-float" hidden>
         <div class="floatbar">
+          <!-- What you are actually carrying leads, the same order the
+               administration table uses and for the same reason: it is the
+               question somebody has about their own float.
+               All three are kept here, unlike that table, because they answer
+               different questions to the person holding the cash - what is
+               left to spend, what the company will ask you to account for,
+               and what you have already spent and are waiting to hear about.
+               Each is always a figure, nought included. -->
+          <span class="fb"><span class="k">In hand</span><span class="v" id="mf-hand">—</span></span>
           <span class="fb"><span class="k">Still out with you</span><span class="v" id="mf-out">—</span></span>
           <span class="fb"><span class="k">Spent, not yet settled</span><span class="v" id="mf-flight">—</span></span>
-          <span class="fb"><span class="k">In hand</span><span class="v" id="mf-hand">—</span></span>
         </div>
         <p class="sf-hint floatnote" id="mf-note"></p>
         <table><thead><tr>
@@ -12455,14 +12463,24 @@ function renderMyFloat() {
   $("mf-hand").style.color = inHand < 0 ? "var(--warn)" : "";
   $("mf-out").style.color = stillOut < 0 ? "var(--bad)" : "";
 
+  /* How the three relate, said whether or not anything is in flight.
+   *
+   * It used to explain the gap only when there was one, so on the ordinary
+   * day - nothing spent and waiting - "in hand" and "still out with you"
+   * printed the same figure under two headings with nothing to say why. Two
+   * numbers that agree are not self-explanatory; they are a reader wondering
+   * which one is the real one. */
   $("mf-note").textContent = stillOut < 0
     ? "More has been settled against your float than was advanced to you. "
       + "Your finance team will want to look at this with you."
     : flight > 0
     ? `${fmt(flight, ccy)} of your claims are spent but not yet settled. `
       + "Until finance decides whether each comes out of this float or is "
-      + "paid to you separately, it is not taken off the figure above."
-    : "What the company has advanced you and not yet accounted for.";
+      + "paid to you separately, it is not taken off what you are still "
+      + "holding \u2014 which is why in hand is lower."
+    : "Still out with you is what the company has advanced and not yet "
+      + "accounted for; in hand is the same figure while nothing you have "
+      + "spent is waiting to be settled.";
 
   const log = $("mine-float-log");
   log.textContent = "";
