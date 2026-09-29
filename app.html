@@ -1684,6 +1684,11 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
              anything on it but decides none of it. Reviewing and paying are
              two jobs; the whole value of separating them is lost if the
              person who moves the money also releases it. -->
+        <!-- Why Approve is dead on a selection that is not finished. A greyed
+             button with no sentence beside it is indistinguishable from a
+             broken one, and the two controls that fix it are in the row
+             above. -->
+        <p class="msg paymsg batchwhy" id="q-approve-why" hidden></p>
         <div class="banner" id="queue-banner" hidden></div>
         <!-- The same table as Pending settlement, column for column where the
              column means the same thing. They are the two lists a reviewer
@@ -5287,12 +5292,35 @@ async function setOnPicked(field, value) {
 }
 
 /** The button, saying what it will do and to how many. */
+/* The gate the claim page applies, asked of a claim in the list.
+ *
+ * Approve on a claim's own page is greyed until the expense type and the cost
+ * centre are set. Bulk approve was not, so the same reviewer could release
+ * twelve claims from the queue that the console would have refused one at a
+ * time - and they landed in Pending settlement unpayable, which is the state
+ * the gate exists to prevent.
+ *
+ * `payBlocker` is that pair of questions, asked of the record rather than of
+ * a dropdown, which is the right source here: the queue has no working copy,
+ * and a bulk set writes to the server and reloads before this is asked again.
+ * Its wording is finance's, so only the answer is used.
+ *
+ * Deliberately not `approveBlocker`, which gates the *checkbox*. The box has
+ * to stay tickable on an unfinished claim, because ticking is how a reviewer
+ * selects the claims to set a type and a group on - gating both on one rule
+ * would mean the only claims that could be fixed in bulk were the ones that
+ * did not need it.
+ */
+const notFinished = (sub) => !!payBlocker(sub);
+
 function paintApproveButton() {
   const btn = $("q-approve");
+  const why = $("q-approve-why");
   if (!btn) return;
   const chosen = queueRows().filter(sub => picked.has(sub.id));
+  const unfinished = chosen.filter(notFinished);
   btn.hidden = !can.review() || !chosen.length;
-  btn.disabled = approving;
+  btn.disabled = approving || unfinished.length > 0;
   const total = chosen.reduce((t, sub) => {
     const res = evaluate(sub);
     const pv = sub.payoutValue, rate = pv && parseFloat(pv.rate);
@@ -5303,8 +5331,32 @@ function paintApproveButton() {
   btn.textContent = approving
     ? "Approving…"
     : `Approve ${chosen.length} · ${fmt(total, orgCurrency())}`;
-  btn.title = "Each one is checked again on the server, exactly as it would "
-    + "be on its own page.";
+  btn.title = unfinished.length
+    ? `${unfinished.length} of these still needs an expense type or a cost `
+      + "centre. Set them above."
+    : "Each one is checked again on the server, exactly as it would "
+      + "be on its own page.";
+
+  /* Said on the page, not only on a tooltip.
+   *
+   * The two dropdowns that fix it are in the same row as the button, so this
+   * names the shortfall and points at them rather than sending anybody to a
+   * claim page one at a time. */
+  if (why) {
+    why.hidden = btn.hidden || !unfinished.length;
+    if (unfinished.length) {
+      const noType = unfinished.filter(sub =>
+        !rules.types.some(t => t.enabled && t.id === sub.type)).length;
+      const noGroup = unfinished.filter(sub =>
+        (ORG_PROFILE.groups || []).length && !sub.groupId).length;
+      why.textContent =
+        `${unfinished.length} of the ${chosen.length} selected cannot be `
+        + "approved yet — "
+        + [noType ? `${noType} with no expense type` : "",
+           noGroup ? `${noGroup} with no cost centre` : ""].filter(Boolean).join(", ")
+        + ". Set them with the two dropdowns above, or untick them.";
+    }
+  }
 }
 
 let approving = false;
@@ -5314,6 +5366,14 @@ async function approvePicked() {
   if (approving) return;
   const chosen = queueRows().filter(sub => picked.has(sub.id));
   if (!chosen.length) return;
+  /* The same gate the button is drawn from, asked again here.
+   *
+   * A disabled button fires no click, so this is not what stops a reviewer -
+   * it is what stops the selection changing between the paint and the press.
+   * Ticking a row repaints, so the two cannot drift far; the cost of asking
+   * twice is one line and the cost of not asking is releasing a claim the
+   * screen said could not be released. */
+  if (chosen.some(notFinished)) return;
 
   /* Asked once, and the question names what it is about.
    *
