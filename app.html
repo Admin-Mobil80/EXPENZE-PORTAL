@@ -1188,6 +1188,19 @@ tr.opens:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
 /* The queue is empty. Green, because finishing is a good outcome and the
    stamp beside it is already reporting the decision that emptied it. */
 .stamp.done { color:var(--ok); }
+/* The confirmation after a decision.
+ *
+ * It takes the whole actions row rather than sitting in it as another chip:
+ * the row is a line of controls, and what a reviewer needs in the second
+ * after pressing Approve is a block that reads as an answer. The row is
+ * flex, so this claims the full width and stacks inside itself. */
+.decided { flex:1 1 100%; display:flex; flex-direction:column; gap:3px; }
+.decided .dhead { margin:0; font-size:.95rem; font-weight:600; color:var(--ok); }
+.decided.bad .dhead { color:var(--bad); }
+.decided .dwhat { margin:0; font-family:"IBM Plex Mono",monospace;
+  font-size:.72rem; color:var(--muted); }
+.decided .dnext { margin:0 0 5px; font-size:.82rem; color:var(--ink); }
+.decided .drow { display:flex; flex-wrap:wrap; gap:9px; align-items:center; }
 /* And a refusal in the colour a refusal is everywhere else on this page. */
 .stamp.bad { color:var(--bad); }
 /* The refresh button, when the last attempt did not reach the server.
@@ -4610,6 +4623,21 @@ let claimFrom = "payments";
 /* The claim whose decision emptied the review queue, if the last one did. */
 let clearedTheQueue = null;
 
+/* The claim decided in this session, and what was decided.
+ *
+ * What a reviewer got after pressing Approve was a row of small monospace
+ * stamps in the strip the button had been in: a tick, a name, a time, a
+ * sentence about Pending settlement, and a Next button among them. Every word
+ * of it true, and none of it reading as the answer to "did that work" - the
+ * page looked the same as before except that the button had gone.
+ *
+ * So a decision made here gets a confirmation that is shaped like one, and
+ * only a decision made here: opening a claim somebody decided last week from
+ * the Settled tab should say what happened to it, not congratulate the reader
+ * on something they did not just do. That is what this flag separates.
+ */
+let justDecided = null;
+
 /* The claims either side of this one, captured when the page was opened.
  *
  * Frozen deliberately. Deciding a claim takes it out of the review queue, so a
@@ -6666,6 +6694,97 @@ function renderDetail() {
     s.append(dot, document.createTextNode("Saving…"));
     s.setAttribute("role", "status");
     abox.appendChild(s);
+  } else if (arm === "decided" && justDecided && justDecided.id === sub.id) {
+    /* What just happened, shaped like an answer.
+     *
+     * The old row said all of this and said it as five monospace stamps in
+     * the strip the button had been in - so the page a reviewer saw after
+     * pressing Approve looked like the page before it, minus a button. The
+     * facts were right and the moment was missing.
+     *
+     * Three things, in the order somebody wants them: what was decided, what
+     * becomes of the claim, and the way on. The way on is a real button
+     * rather than a stamp among stamps, because working a queue is one
+     * decision after another and the next one is what the reviewer is for.
+     */
+    const done = document.createElement("div");
+    const refusedNow = decision && decision.action === "Rejected";
+    done.className = "decided" + (refusedNow ? " bad" : "");
+    abox.classList.toggle("refused", !!refusedNow);
+
+    const head = document.createElement("p");
+    head.className = "dhead";
+    head.textContent = (refusedNow ? "\u2715 Rejected" : "\u2713 Approved")
+      + (decision.by ? ` by ${personName(decision.by)}` : "")
+      + (decision.at ? ` at ${decision.at}` : "");
+    done.appendChild(head);
+
+    // The claim itself, so the confirmation stands on its own rather than
+    // relying on the reader still having the header in view.
+    const what = document.createElement("p");
+    what.className = "dwhat";
+    const pay = payable(sub);
+    what.textContent = [sub.reference || "", sub.who || "",
+                        pay.amount === null ? "" : fmt(pay.amount, pay.ccy)]
+      .filter(Boolean).join(" \u00b7 ");
+    done.appendChild(what);
+
+    const next = document.createElement("p");
+    next.className = "dnext";
+    /* Where the claim went, asked of the claim rather than assumed.
+     *
+     * A claim decided a second ago is not settled and not paid - `decide`
+     * runs on an undecided one - so in practice this is always the middle
+     * arm. But `loadRecords` runs between the write and this render, and if
+     * finance settled it in another tab in that window, "in Pending
+     * settlement now" would be the one thing on screen that was already
+     * false. The same guard the older sentence below carries. */
+    const settledAlready = settlementStage(sub);
+    next.textContent = refusedNow
+      ? `Not being reimbursed. ${sub.who || "The submitter"} is told why, in `
+        + "your words."
+      : (isPaid(sub) || settledAlready)
+      ? `Already ${String(settledAlready || "settled").toLowerCase()} — finance `
+        + "reached it before this render did."
+      : "In Pending settlement now — finance pays it from there. "
+        + `${sub.who || "The submitter"} has been told.`;
+    done.appendChild(next);
+
+    /* And the way on, which is the whole reason somebody is on this screen.
+     *
+     * Deciding the last claim in the queue used to leave the reviewer on it
+     * with no sign the work was over - the only way to find out was to press
+     * Back and read an empty list. Both endings are answered here: the next
+     * claim, or where the queue went. */
+    const row = document.createElement("div");
+    row.className = "drow";
+    const at = claimSiblings.indexOf(sub.id);
+    const onward = mayReview && at >= 0 && claimSiblings[at + 1];
+    if (onward) {
+      const nx = document.createElement("button");
+      nx.className = "btn primary"; nx.type = "button";
+      nx.textContent = "Next claim →";
+      nx.title = "Open the next claim in the list this one was opened from.";
+      nx.addEventListener("click", () => stepClaim(1));
+      row.appendChild(nx);
+    }
+    const left = SUBMISSIONS.filter(isQueued).length;
+    const note = document.createElement("span");
+    note.className = "stamp " + (left ? "pending" : "done");
+    note.textContent = left
+      ? `${left} still waiting for review.`
+      : "Nothing else is waiting for review.";
+    row.appendChild(note);
+    if (!left) {
+      const go = document.createElement("button");
+      go.className = "btn" + (onward ? "" : " primary"); go.type = "button";
+      go.textContent = "Pending settlement →";
+      go.title = "Everything you have released is waiting to be paid there.";
+      go.addEventListener("click", () => goTo("payments"));
+      row.appendChild(go);
+    }
+    done.appendChild(row);
+    abox.appendChild(done);
   } else if (arm === "decided") {
     const s = document.createElement("span"); s.className="stamp";
     const stageNow = settlementStage(sub);
@@ -7981,6 +8100,9 @@ async function decide(sub, action, button, opts) {
    */
   clearedTheQueue = (REVIEW_ACTION[action] && !SUBMISSIONS.some(isQueued))
     ? sub.id : null;
+  // Pinned to the claim, so stepping to the next one leaves it behind rather
+  // than confirming the same decision over a different claim.
+  justDecided = REVIEW_ACTION[action] ? { id: sub.id, action } : null;
   renderAll();
 }
 
