@@ -4490,6 +4490,35 @@ const agentMayRelease = (sub) =>
  * pay. */
 const isCompanion = (sub) => !!sub.companionOf;
 
+/* A duplicate flag whose other claim has gone away.
+ *
+ * Mobil80-Exp-89 was flagged as a possible duplicate of Exp-86 and stayed
+ * flagged after Exp-86 was withdrawn. Nothing was broken in the fingerprint
+ * machinery: withdrawing a claim releases every key it held, exactly so the
+ * resubmission it was withdrawn to make is not turned away. It released them
+ * seven minutes too late - Exp-89 arrived at 09:32 and Exp-86 was withdrawn
+ * at 09:39 - so the audit ran while the other claim was still live.
+ *
+ * A verdict is a snapshot of the moment it was computed and nothing re-reads
+ * it. That is right: re-auditing behind a reviewer is the design this product
+ * deliberately does not have. But the *finding* is a statement about another
+ * claim, and that claim's state is live - so the honest thing is to check it
+ * when the finding is read rather than to leave a reviewer comparing a bill
+ * against something nobody is claiming.
+ *
+ * Withdrawn or rejected, because both mean the company is not paying it.
+ * Settled does not count: a duplicate of a bill that has actually been paid
+ * is the case this finding exists for.
+ */
+function duplicateSettled(sub) {
+  const ref = sub && sub.duplicateOf;
+  if (!ref) return null;
+  const other = SUBMISSIONS.find(s => s.reference === ref || s.id === ref);
+  if (!other) return null;
+  const stage = claimStage(other).stage;
+  return (stage === "withdrawn" || stage === "rejected") ? stage : null;
+}
+
 /* The claims, out of the documents.
  *
  * Reports counted both. Pending settlement counted one — `payableClaims` has
@@ -5625,7 +5654,11 @@ function renderQueue() {
      * visible in the figures beside it and set out in full on the claim page.
      * A duplicate is a claim about a *different* claim and cannot be judged
      * without knowing which, so the reference travels with the vendor. */
-    const dupe = sub.duplicateOf && (!blocking || blocking.code === "possible_duplicate");
+    // Not where the claim it names has been withdrawn or rejected since. A
+    // red chip pointing at a claim nobody is paying is a reviewer opening two
+    // receipts to find there was never anything to compare.
+    const dupe = sub.duplicateOf && !duplicateSettled(sub)
+      && (!blocking || blocking.code === "possible_duplicate");
     const billed = dayStamp(sub.receiptDate);
 
     opensClaim(tr, sub.id);
@@ -6444,13 +6477,27 @@ function renderDetail() {
     vbox.appendChild(p);
   } else standing.forEach(v => {
     const row = document.createElement("div");
+    /* Unless the claim it names has gone away since.
+     *
+     * Then it is not red and it does not read as something to weigh up: the
+     * other claim is withdrawn or rejected, nobody is being paid for it, and
+     * there is nothing here for a reviewer to compare. The row stays, because
+     * the two receipts really were the same bill and that is worth seeing -
+     * it just says what actually happened. */
+    const wentAway = v.code === "possible_duplicate" ? duplicateSettled(sub) : null;
     // A duplicate reads red here for the same reason it does in the queue: it
     // is the one finding whose answer is on another claim rather than on this
     // screen, and it is the only one that can end in refusing a payment.
-    row.className = "violation " + (v.blocking ? "blocking" : "deduct")
-      + (v.code === "possible_duplicate" ? " dupe" : "");
+    row.className = "violation " + (wentAway ? "deduct"
+      : (v.blocking ? "blocking" : "deduct"))
+      + (v.code === "possible_duplicate" && !wentAway ? " dupe" : "");
     const code = document.createElement("code"); code.textContent = v.code;
-    const msg = document.createElement("span"); msg.className="msg"; msg.textContent = v.msg;
+    const msg = document.createElement("span"); msg.className="msg";
+    msg.textContent = wentAway
+      ? `The same bill was claimed on ${sub.duplicateOf}, and that claim was `
+        + `${wentAway === "withdrawn" ? "withdrawn" : "rejected"} — so nothing `
+        + "is being paid twice. This one stands on its own."
+      : v.msg;
     /* No minus sign, because nothing is being deducted.
      *
      * This printed "−₹0.00" against every finding, which is what a deduction
@@ -9398,7 +9445,12 @@ function paintReading(sub) {
   if (sub.language && sub.language !== "English") notes.push(`Written in ${sub.language}.`);
   if (sub.currencyAssumed) notes.push(`Currency not printed; ${res.currency} assumed from your country.`);
   if (sub.senderNote) notes.push(`Sent with the note: “${sub.senderNote}”`);
-  if (sub.duplicateOf) notes.push(`Same vendor, date and total as claim ${sub.duplicateOf}.`);
+  if (sub.duplicateOf) {
+    const gone = duplicateSettled(sub);
+    notes.push(gone
+      ? `Same vendor, date and total as claim ${sub.duplicateOf}, which was ${gone}.`
+      : `Same vendor, date and total as claim ${sub.duplicateOf}.`);
+  }
   if (notes.length) {
     const p = document.createElement("p");
     p.className = "tnote";
@@ -10877,7 +10929,11 @@ const SETTLE_REJECT_REASONS = [
 function reasonChoices(sub, kind) {
   if (kind === "settle_rejected") return SETTLE_REJECT_REASONS.slice();
   const list = REJECT_REASONS.slice();
-  if (sub.duplicateOf) {
+  // Offered only while the other claim is live. "The same bill as Exp-86,
+  // which has already been claimed" is not a reason to refuse anything when
+  // Exp-86 was withdrawn, and it is the reason that would be reached for
+  // first because it sits at the top of the list.
+  if (sub.duplicateOf && !duplicateSettled(sub)) {
     list.unshift(`This is the same bill as ${sub.duplicateOf}, which has `
       + "already been claimed.");
   }
