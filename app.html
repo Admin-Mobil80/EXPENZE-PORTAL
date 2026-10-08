@@ -1903,6 +1903,11 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <nav class="subtabs" id="m-subtabs" aria-label="My expenses"></nav>
       <div class="items-scroll">
         <table><thead><tr>
+          <!-- "Sent" carried only an age - "5d ago", "9d ago". That is the
+               right thing to read at a glance and the wrong thing to quote:
+               somebody asking finance about a claim, or checking it against
+               their own records, needs the date. Both, with the date leading
+               because it is the fact and the age is the gloss on it. -->
           <th scope="col">Vendor</th><th scope="col">Sent</th><th scope="col">Via</th>
           <th scope="col" style="text-align:right">Claimed</th>
           <!-- Was "Reimbursable", which printed the claimed amount again on
@@ -12912,7 +12917,8 @@ function renderMine() {
     const tr = document.createElement("tr");
     opensClaim(tr, sub.id);
     tr.innerHTML = `<td>${esc(sub.vendor)}${meta}` +
-      `</td><td class="ident">${whenLabel(sub)}</td>` +
+      `</td><td class="day">${esc(dayStamp(sub.at) || "")}`
+        + `<span class="amtsub">${esc(whenLabel(sub))}</span></td>` +
       `<td>${channelTag(sub.ch)}</td>` +
       // Both currencies where they differ, the same as the review queue.
       // Claimed was printed in the currency of the receipt and Settled in the
