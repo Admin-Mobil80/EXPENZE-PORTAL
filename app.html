@@ -5301,7 +5301,7 @@ function paintBulkFields() {
     groupSel.disabled = bulkSaving;
     if (!groupSel.hidden) {
       groupSel.innerHTML = `<option value="">Set group…</option>`
-        + (ORG_PROFILE.groups || [])
+        + pickableGroups()
             .map(g => `<option value="${esc(g.id)}">${esc(g.label || g.id)}</option>`)
             .join("");
       groupSel.value = "";
@@ -6203,7 +6203,7 @@ function renderDetail() {
       none.value = ""; none.textContent = "Not set";
       none.selected = !g.id;
       gs.appendChild(none);
-      groups.forEach(x => {
+      pickableGroups().forEach(x => {
         const o = document.createElement("option");
         o.value = x.id; o.textContent = x.label;
         if (x.id === g.id) o.selected = true;
@@ -7474,6 +7474,23 @@ function renderTypeIndex(boxId, subtitle, onlyEnabled) {
  * at Organisation. Which is the answer: a type that is off is a question
  * about the organisation's vocabulary, not about its money.
  */
+/* The cost centres, in the order somebody looks for one.
+ *
+ * Same reasoning as `pickableTypes` below, and the same split: a list being
+ * *picked from* reads alphabetically, a list being *maintained* keeps the
+ * order it was built in so a group added a minute ago is where its author
+ * left it.
+ *
+ * A copy, because `sort` is in place and `ORG_PROFILE.groups` is the record
+ * everything else reads - including `groupsOfPerson`, which sorts a person's
+ * groups into the organisation's own order on purpose.
+ */
+function pickableGroups() {
+  return (ORG_PROFILE.groups || []).slice().sort((a, b) =>
+    String(a.label || a.id).localeCompare(String(b.label || b.id),
+                                          undefined, { sensitivity: "base" }));
+}
+
 /* The enabled types, in the order somebody looks for one.
  *
  * They came out in the order the organisation happened to configure them,
@@ -8726,7 +8743,7 @@ function renderBudgets() {
     scopeList.appendChild(b);
   };
 
-  const groups = ORG_PROFILE.groups.filter(g => shown(g.label));
+  const groups = pickableGroups().filter(g => shown(g.label));
   const people = PEOPLE.filter(p => shown(p.name) || shown(p.email));
 
   if (budScopeKind === "org") {
@@ -11577,7 +11594,7 @@ function renderPeople() {
   const gsel = $("p-group");
   if (gsel) {
     const chosen = gsel.value;
-    const groups = ORG_PROFILE.groups || [];
+    const groups = pickableGroups();
     gsel.textContent = "";
     groups.forEach(g => {
       const o = document.createElement("option");
@@ -11795,7 +11812,7 @@ function renderPeople() {
       box.appendChild(head);
       const wrap = document.createElement("div");
       wrap.className = "toggles";
-      ORG_PROFILE.groups.forEach(g => {
+      pickableGroups().forEach(g => {
         const on = (person.groups || []).includes(g.id);
         const l = document.createElement("label");
         l.className = "toggle mini" + (on ? " on" : "");
