@@ -10045,7 +10045,24 @@ function renderPayments() {
     || String(c.sub.who || "").toLowerCase().includes(findWho)
     || String(c.sub.whoEmail || "").toLowerCase().includes(findWho);
 
-  const awaiting = claims.filter(c => c.outstanding > 0 && matchesWho(c));
+  /* Oldest first. This is a queue of people waiting for their own money.
+   *
+   * It came out newest first, which is the right order for a log and the
+   * wrong one for a payment run: the claim somebody has been chasing for
+   * three weeks sat at the bottom, under the one that arrived this morning,
+   * and a finance executive working down the screen paid the patient last.
+   *
+   * `at` rather than the `date` the column prints: it is the instant the
+   * receipt arrived, in milliseconds, so two claims sent on the same day keep
+   * the order they were sent in instead of tying and falling back to whatever
+   * order the scan returned.
+   *
+   * The print stack and the batch form read this same list, so they follow
+   * without being told - "every bill in this list, in the order the list is
+   * in" is now the order somebody would pay them in.
+   */
+  const awaiting = claims.filter(c => c.outstanding > 0 && matchesWho(c))
+    .sort((a, b) => (Number(a.sub.at) || 0) - (Number(b.sub.at) || 0));
   // Counted before the filter, so "3 of 10" can be said rather than the other
   // seven quietly ceasing to exist.
   const awaitingAll = claims.filter(c => c.outstanding > 0);
