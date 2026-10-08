@@ -5287,7 +5287,7 @@ function paintBulkFields() {
     typeSel.disabled = bulkSaving;
     if (show) {
       typeSel.innerHTML = `<option value="">Set expense type…</option>`
-        + rules.types.filter(t => t.enabled)
+        + pickableTypes()
             .map(t => `<option value="${esc(t.id)}">${esc(t.label || t.id)}</option>`)
             .join("");
       typeSel.value = "";
@@ -6153,7 +6153,7 @@ function renderDetail() {
   // The reviewer can reclassify. Misreading a canteen grocery run as a meal is
   // the mistake that most often sends a valid claim to review.
   const et = $("etype"); et.textContent = "";
-  rules.types.filter(t => t.enabled).forEach(t => {
+  pickableTypes().forEach(t => {
     const o = document.createElement("option");
     o.value = t.id; o.textContent = t.label;
     if (t.id === w.type) o.selected = true;
@@ -7474,6 +7474,31 @@ function renderTypeIndex(boxId, subtitle, onlyEnabled) {
  * at Organisation. Which is the answer: a type that is off is a question
  * about the organisation's vocabulary, not about its money.
  */
+/* The enabled types, in the order somebody looks for one.
+ *
+ * They came out in the order the organisation happened to configure them,
+ * which is the order they were added - meaningful to whoever added them and
+ * to nobody else. Fifteen of them in a dropdown, and finding "Stationery"
+ * meant reading every line, because there was nothing to predict where it
+ * would be. On the claim page that is the control between a reviewer and
+ * every approval.
+ *
+ * `localeCompare` with `sensitivity: "base"`, because the labels are typed by
+ * hand and come out mixed case - "Cafe Management" beside "Canteen
+ * groceries". Ordering by code point would sort every capital ahead of every
+ * lower-case word and produce two alphabets, which is worse than one wrong
+ * one.
+ *
+ * Not applied to the editors on Policy rules and Organisation: those are
+ * lists somebody is *maintaining*, where a type added a minute ago being at
+ * the bottom is how they find it again.
+ */
+function pickableTypes() {
+  return rules.types.filter(t => t.enabled).slice().sort((a, b) =>
+    String(a.label || a.id).localeCompare(String(b.label || b.id),
+                                          undefined, { sensitivity: "base" }));
+}
+
 function typesFor(onlyEnabled) {
   return onlyEnabled ? rules.types.filter(t => t.enabled) : rules.types;
 }
@@ -8497,7 +8522,9 @@ function budEditorLines(scope) {
   }
   const rows = [{ id:"__total", label:"All expenses",
                   value: rec.total, inherited: parent.total, from: parentName }];
-  rules.types.filter(t => t.enabled).forEach(t => rows.push({
+  // Same order as the dropdowns. Setting a limit per type means finding the
+  // type first, and this is the longest of the three lists.
+  pickableTypes().forEach(t => rows.push({
     id: t.id, label: t.label,
     value: (rec.types || {})[t.id],
     inherited: (parent.types || {})[t.id],
