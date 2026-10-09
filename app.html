@@ -4065,9 +4065,11 @@ function budgetValue(sub) {
  * run by 8,819.23 and the float reporting money outstanding with nothing
  * pending.
  */
-function spendIn(belongs) {
+function spendIn(belongs, over) {
   const ccy = orgCurrency();
-  const period = (ORG_PROFILE.budgets || {}).period || "month";
+  // A person may be measured weekly while the organisation is measured
+  // monthly, so the caller can say which window it is asking about.
+  const period = over || (ORG_PROFILE.budgets || {}).period || "month";
   const [from, to] = periodBounds(period, today());
   const a = from.toISOString().slice(0, 10), b = to.toISOString().slice(0, 10);
   /* Not what the company refused, and not what nobody claimed.
@@ -4120,39 +4122,32 @@ function spendForScope(scope, person) {
 function budgetLines(person) {
   const b = budgetFor(person);
   if (!b.hasAny) return null;
-  const ccy = orgCurrency();
-  const subs = submittedBy(person.name, b.period);
-
-  // A budget is one number in one currency; spend is not. Somebody buys lunch
-  // in rupees, a conference ticket in dollars and a hotel in dirhams out of
-  // the same monthly allowance, and all three have to land on the same line.
-  //
-  // Foreign claims used to be dropped from the arithmetic and counted in a
-  // footnote, so a team could go well past its limit entirely in dollars and
-  // read as comfortably inside it. The server converts them - at the rate of
-  // the day each was audited - and anything it could not convert is still
-  // named rather than silently treated as nothing.
-  const mine = subs.filter(s => evaluate(s).currency === ccy || budgetValue(s) !== null);
-  const unconverted = subs.length - mine.length;
-
-  const spendOf = (list) => list.reduce((t, s) => {
-    const converted = budgetValue(s);
-    return t + (converted === null ? evaluate(s).receiptTotal : converted);
-  }, 0);
+  /* The same spend the budget editor shows, not a second count of it.
+   *
+   * This walked `submittedBy` with no exclusions at all, so the watchlist and
+   * the two "over budget" badges counted a refused claim, a withdrawn one and
+   * a companion document - while the editor beside them, through `spendIn`,
+   * counted none of the three. The same person could read as over on the
+   * watchlist and under on the row you opened to look at it.
+   *
+   * One arithmetic. `budgetFor` still answers the other half - what the
+   * limits are and which level each came from - which is the question this
+   * function is actually for.
+   */
+  const spend = spendIn(s => s.who === person.name, b.period);
   const lines = [];
   if (b.total != null) {
     lines.push({ id:"__total", label:"All expenses", limit:b.total, from:b.totalFrom,
-                 spent: spendOf(mine), count: mine.length });
+                 spent: spend.total });
   }
   Object.entries(b.types).forEach(([id, t]) => {
     const rule = rules.types.find(x => x.id === id);
-    const list = mine.filter(s => workingCopy(s).type === id);
     lines.push({ id, label: rule ? rule.label : id, limit:t.limit, from:t.from,
-                 spent: spendOf(list), count: list.length });
+                 spent: spend.types[id] || 0 });
   });
   lines.forEach(l => { l.status = budgetStatus(l.spent, l.limit); });
   return { person, period:b.period, periodLabel: periodName(b.period, today()),
-           ccy, other: unconverted, converted: mine.filter(s => budgetValue(s) !== null).length,
+           ccy: spend.ccy, other: spend.other, converted: spend.converted,
            lines,
            worst: lines.some(l => l.status === "over") ? "over"
                 : lines.some(l => l.status === "near") ? "near" : "under" };
@@ -8722,7 +8717,7 @@ function renderBudgets() {
   $("bud-save").style.display = rw ? "" : "none";
   $("bud-hint").textContent =
     "A budget never stops a receipt. It flags spend to you and to the owner, and each "
-    + "person sees their own under My expenses. Blank means no limit of its own — the "
+    + "person is told when they pass one. Blank means no limit of its own — the "
     + "level above still applies. Counted against every live claim in the period — "
     + "in review, waiting to be paid, and settled — not only what has been paid. "
     + `Rejected and withdrawn claims are not counted. Amounts in ${orgCurrency()}.`;
