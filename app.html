@@ -4035,28 +4035,43 @@ function budgetValue(sub) {
   return null;
 }
 
-/* What one person has spent this period, by expense type.
+/* What one scope has spent this period, by expense type.
  *
  * `budgetLines` below answers a different question - "how is this person
  * doing against their limits" - and it builds a line only for a type that
  * *has* a limit somewhere. The budget editor used it for its "used" column,
  * so the figure appeared against Meals and Courier and nothing at all against
- * Computer Peripherals: not "nothing was spent", but no row to put it in.
+ * Computer Peripherals: not "nothing was spent", but no row to put it in. On
+ * this account one of those blanks was hiding real spend.
  *
  * Which is the wrong way round for that screen. Somebody deciding whether a
  * scope needs its own limit needs to know what it spends, and the rows with
  * no limit yet are exactly the ones where that is the question. The blanks
  * were on the only rows anybody was there to think about.
  *
- * So spend is asked on its own terms, of every type, whether or not anything
- * caps it. Same currency handling as the budget arithmetic: converted where
- * the server could, counted at face value where it could not, and the ones it
- * could not convert reported separately rather than summed in at nothing.
+ * Takes a predicate rather than a person, because the same question is worth
+ * asking of all three scopes the editor has tabs for - the organisation, one
+ * group, one person - and three copies of this arithmetic is two of them
+ * eventually counting something the third does not.
+ *
+ * Currency: converted where the server could, face value where it could not,
+ * and what it could not convert reported separately rather than summed in at
+ * nothing. The same handling the budget limits use, so this column and the
+ * figure beside it cannot count differently.
+ *
+ * A companion document is not a second spend. It is the second attachment of
+ * one purchase - an invoice and its receipt - and counting it adds the same
+ * money twice, which is the bug that had Reports disagreeing with the payment
+ * run by 8,819.23 and the float reporting money outstanding with nothing
+ * pending.
  */
-function spendByType(person) {
+function spendIn(belongs) {
   const ccy = orgCurrency();
   const period = (ORG_PROFILE.budgets || {}).period || "month";
-  const subs = submittedBy(person.name, period);
+  const [from, to] = periodBounds(period, today());
+  const a = from.toISOString().slice(0, 10), b = to.toISOString().slice(0, 10);
+  const subs = claimsOnly(SUBMISSIONS)
+    .filter(s => s.date >= a && s.date <= b && belongs(s));
   const mine = subs.filter(s => evaluate(s).currency === ccy
                                 || budgetValue(s) !== null);
   const amount = (s) => {
@@ -4075,6 +4090,16 @@ function spendByType(person) {
            // is therefore in none of the figures above.
            converted: mine.filter(s => budgetValue(s) !== null).length,
            other: subs.length - mine.length };
+}
+
+/** The scope the budget editor has open, as a spend question. */
+function spendForScope(scope, person) {
+  if (scope === "org") return spendIn(() => true);
+  if (scope.startsWith("g:")) {
+    const gid = scope.slice(2);
+    return spendIn(s => groupOf(s).id === gid);
+  }
+  return person ? spendIn(s => s.who === person.name) : null;
 }
 
 function budgetLines(person) {
@@ -8817,7 +8842,13 @@ function renderBudgets() {
   // ---- editor ----
   const ed = $("bud-editor"); ed.textContent = "";
   const person = budScope.startsWith("p:") ? PEOPLE.find(p => p.email === budScope.slice(2)) : null;
-  const spend = person ? spendByType(person) : null;
+  /* Every tab, not only People.
+   *
+   * The organisation's and a group's spend were simply absent - a column of
+   * nothing, which reads as "this product does not know" rather than as an
+   * answer. They are the two scopes where a limit is most often set first,
+   * and the figure that decides what to set it to was on the third tab. */
+  const spend = spendForScope(budScope, person);
 
   const title = document.createElement("p");
   title.className = "hint"; title.style.margin = "0 0 6px";
@@ -8919,7 +8950,7 @@ function renderBudgets() {
       ? `${spend.converted} receipt${spend.converted === 1 ? "" : "s"} in another `
         + `currency ${spend.converted === 1 ? "was" : "were"} converted to `
         + `${spend.ccy} at the rate on the day, for this check only — `
-        + `${person ? person.name : "they"} ${spend.converted === 1 ? "is" : "are"} `
+        + `${spend.converted === 1 ? "it is" : "they are"} `
         + `reimbursed in the currency spent. ` : "")
       + (spend.other
       ? `${spend.other} could not be converted, so ${spend.other === 1 ? "it is" : "they are"} `
