@@ -1586,7 +1586,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
        nudge, not a wall - somebody part way through typing a policy change
        must be able to finish and save before reloading. -->
   <div class="stalebar" id="stale-build" hidden>
-    <span><strong>A newer version of this console has been released.</strong>
+    <span id="stale-say"><strong>A newer version of this console has been released.</strong>
       This page is still running the one it loaded, so what you see may be out
       of date.</span>
     <button class="btn" type="button" id="stale-reload">Reload</button>
@@ -3519,9 +3519,34 @@ async function buildOf() {
   }
 }
 
+/* One bar, two reasons, and they want different things done about them.
+ *
+ * A new page has to be fetched, which is a reload and loses whatever is
+ * half-typed. New data behind the same page does not: the console reloads
+ * records on demand already, so the answer there is the refresh it would do
+ * anyway, and nothing is lost.
+ *
+ * Telling somebody to reload when a refresh would do is how a product
+ * teaches people to hard-refresh at every surprise - which is what was
+ * happening, because there was nothing to tell them which kind of change had
+ * just shipped.
+ */
 function paintStaleBuild() {
   const bar = $("stale-build");
-  if (bar) bar.hidden = false;
+  if (!bar) return;
+  const pageMoved = !!latestBuild && latestBuild !== loadedBuild;
+  bar.hidden = false;
+  const say = $("stale-say"), act = $("stale-reload");
+  if (say) {
+    say.innerHTML = pageMoved
+      ? "<strong>A newer version of this console has been released.</strong> "
+        + "This page is still running the one it loaded, so what you see may "
+        + "be out of date."
+      : "<strong>The server has been updated.</strong> This page is current, "
+        + "but the figures on it were read before the change — a refresh "
+        + "fetches them again. Nothing you have typed is lost.";
+  }
+  if (act) act.textContent = pageMoved ? "Reload" : "Refresh";
 }
 
 /* Asked once per person, on the way in, and never again once answered.
@@ -13383,10 +13408,38 @@ async function authCall(path, body) {
       sessionOver();
       return { ok: false, data: { error: "Your session has ended. Sign in again." } };
     }
+    noteApiBuild(res.headers.get("X-Expenze-Build"));
     return { ok: res.ok, data: await res.json().catch(() => ({})) };
   } catch (_) {
     return { ok: false, data: { error: "Network error." } };
   }
+}
+
+/* Which build of the API answered, and whether it has moved since the first
+ * one did.
+ *
+ * `checkBuild` watches this page's own ETag, which catches "you are running
+ * yesterday's JavaScript" and says nothing at all about the server. A backend
+ * deploy leaves a page that is genuinely current holding data that silently
+ * is not - the float figures, the budget totals, a claim's stage - with no
+ * prompt either way. There was no reliable move except a hard refresh of
+ * something that did not need refreshing.
+ *
+ * The first build seen is the baseline, not a change, for the same reason the
+ * page check takes its baseline at boot: otherwise every console announces
+ * itself as stale on its first call.
+ *
+ * A missing header is no answer rather than a change. It is absent on an
+ * older deploy and on anything that never reaches the handler, and a banner
+ * raised by a proxy stripping a header would be worse than not asking.
+ */
+let apiBuild = "", apiBuildLatest = "", apiBuildDismissed = "";
+
+function noteApiBuild(build) {
+  if (!build) return;
+  if (!apiBuild) { apiBuild = build; return; }
+  apiBuildLatest = build;
+  if (build !== apiBuild && build !== apiBuildDismissed) paintStaleBuild();
 }
 
 /** Put the original into storage, in the two steps the server allows.
@@ -13930,13 +13983,23 @@ $("adv-new").addEventListener("click", () => {
 });
 $("rules-save").addEventListener("click", () => saveRules("rules-save", "rules-msg"));
 $("rules-discard").addEventListener("click", () => discardRules("rules-msg"));
-$("stale-reload").addEventListener("click", () => location.reload());
+$("stale-reload").addEventListener("click", () => {
+  // A new page needs fetching; new data behind the same page does not.
+  if (latestBuild && latestBuild !== loadedBuild) return location.reload();
+  apiBuild = apiBuildLatest || apiBuild;
+  $("stale-build").hidden = true;
+  refreshNow();
+});
 // Dismissed for this sitting only. It comes back on the next refresh cycle,
 // because the page is still old and pretending otherwise would be the same
 // silence this exists to end.
 $("stale-dismiss").addEventListener("click", () => {
   $("stale-build").hidden = true;
+  // Whichever one raised it. "Not now" means this release, not silence for
+  // ever, so each is remembered separately - dismissing a server change must
+  // not swallow the page change that follows it.
   dismissedBuild = latestBuild;
+  apiBuildDismissed = apiBuildLatest;
 });
 
 /* Take them to the field, not to the tab.
