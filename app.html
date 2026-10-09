@@ -4070,8 +4070,23 @@ function spendIn(belongs) {
   const period = (ORG_PROFILE.budgets || {}).period || "month";
   const [from, to] = periodBounds(period, today());
   const a = from.toISOString().slice(0, 10), b = to.toISOString().slice(0, 10);
+  /* Not what the company refused, and not what nobody claimed.
+   *
+   * A budget counts what is being spent, and a rejected claim is the company
+   * deciding it is not spending that - while a withdrawn one is the submitter
+   * saying it was never a claim at all. Both were eating into a limit that
+   * nothing would ever be paid out of, which makes a budget read as fuller
+   * than it is and sends somebody looking for a conversation about money that
+   * is not going anywhere.
+   *
+   * What is still counted is everything live: in review, cleared and waiting,
+   * and settled. That is the point of the banner's "not only what has been
+   * paid" - a limit nobody notices until the payment run is a limit that has
+   * already been passed.
+   */
+  const spent = (sub) => !["rejected", "withdrawn"].includes(claimStage(sub).stage);
   const subs = claimsOnly(SUBMISSIONS)
-    .filter(s => s.date >= a && s.date <= b && belongs(s));
+    .filter(s => s.date >= a && s.date <= b && spent(s) && belongs(s));
   const mine = subs.filter(s => evaluate(s).currency === ccy
                                 || budgetValue(s) !== null);
   const amount = (s) => {
@@ -8665,8 +8680,9 @@ function renderBudgets() {
   $("bud-hint").textContent =
     "A budget never stops a receipt. It flags spend to you and to the owner, and each "
     + "person sees their own under My expenses. Blank means no limit of its own — the "
-    + "level above still applies. Counted against everything submitted in the period, "
-    + `not only what has been paid. Amounts in ${orgCurrency()}.`;
+    + "level above still applies. Counted against every live claim in the period — "
+    + "in review, waiting to be paid, and settled — not only what has been paid. "
+    + `Rejected and withdrawn claims are not counted. Amounts in ${orgCurrency()}.`;
 
   // ---- watchlist ----
   const watch = budgetWatchlist();
