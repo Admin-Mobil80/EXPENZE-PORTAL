@@ -4641,6 +4641,23 @@ function duplicateSettled(sub) {
  */
 const claimsOnly = (subs) => subs.filter(sub => !isCompanion(sub));
 
+/* Money the company owes, out of the claims that exist.
+ *
+ * A rejected claim is the company deciding it is not paying that; a withdrawn
+ * one is the submitter saying it was never a claim. Neither is spend, and the
+ * headline tiles on Reports have excluded both for as long as they have said
+ * "claimed" - but every breakdown under them walked the unfiltered list, so
+ * By expense type, By group, By user, By month and Where money goes each
+ * added up to more than the figure above them. A drill-down that does not
+ * sum to its own summary sends the reader hunting for a difference nobody
+ * put there on purpose.
+ *
+ * Named once rather than written out at each of the five, which is how the
+ * five came to disagree with the one.
+ */
+const LIVE_STAGES_OUT = ["rejected", "withdrawn"];
+const owedRows = (rows) => rows.filter(r => !LIVE_STAGES_OUT.includes(r.stage));
+
 /* Every document of one purchase: the claim, then whatever arrived with it.
  *
  * An invoice and its receipt are both wanted in the record - the invoice is
@@ -9086,7 +9103,9 @@ function renderPeriod() {
  * failed to load, so an empty month says so out loud. */
 function renderByMonth() {
   const year = reportYear;
-  const rows = analysed().filter(r => yearOf(r.sub) === year);
+  // Same rule as every other money figure on this tab: a refused or
+  // withdrawn claim is not what a month cost.
+  const rows = owedRows(analysed().filter(r => yearOf(r.sub) === year));
   // One currency, the organisation's own, converted at each claim's own rate.
   // This used to follow a selector and drop every claim in any other currency,
   // so a month with two dollar receipts and one rupee receipt charted the
@@ -9248,7 +9267,7 @@ function renderReports() {
      A rejected or withdrawn claim is in none of them - it is not money the
      company owes - so it is out of Claimed too, or the row would never add up
      and the reader would be left hunting for the difference. */
-  const live = rows.filter(r => !["rejected", "withdrawn"].includes(r.stage));
+  const live = owedRows(rows);
   const inReview = live.filter(r => !["approved","part_settled","settled"].includes(r.stage));
   const clearedRows = live.filter(r =>
     ["approved", "part_settled", "settled"].includes(r.stage));
@@ -9293,9 +9312,9 @@ function renderReports() {
 
   // ---- by expense type ----
   const tb = $("r-types"); tb.textContent = "";
-  const types = [...new Set(rows.map(r => r.type))];
+  const types = [...new Set(live.map(r => r.type))];
   types.map(t => {
-    const all = rows.filter(r => r.type === t);
+    const all = live.filter(r => r.type === t);
     const rule = rules.types.find(x => x.id === t);
     return {
       label: rule ? rule.label : t + " (no rule)",
@@ -9321,7 +9340,7 @@ function renderReports() {
   // what finance still has to attribute by hand.
   const untagged = {label: "Not attributed", rows: [], loose: true};
 
-  rows.forEach(r => {
+  live.forEach(r => {
     const g = groupOf(r.sub);
     const b = (g.id && buckets.get(g.id)) || untagged;
     b.rows.push(r);
@@ -9369,7 +9388,7 @@ function renderReports() {
    * the handful that spent anything.
    */
   const byWho = new Map();
-  rows.forEach(r => {
+  live.forEach(r => {
     const who = String(r.sub.whoEmail || r.sub.who || "").toLowerCase();
     if (!byWho.has(who)) byWho.set(who, { who, rows: [] });
     byWho.get(who).rows.push(r);
@@ -9423,7 +9442,7 @@ function renderReports() {
   const cats = {};
   // Each claim at its own rate, so a type spans currencies the same way every
   // other figure on this page does.
-  rows.forEach(r => {
+  live.forEach(r => {
     const k = r.type || "unclassified";
     cats[k] = (cats[k] || 0) + r.claimed;
   });
