@@ -4035,6 +4035,48 @@ function budgetValue(sub) {
   return null;
 }
 
+/* What one person has spent this period, by expense type.
+ *
+ * `budgetLines` below answers a different question - "how is this person
+ * doing against their limits" - and it builds a line only for a type that
+ * *has* a limit somewhere. The budget editor used it for its "used" column,
+ * so the figure appeared against Meals and Courier and nothing at all against
+ * Computer Peripherals: not "nothing was spent", but no row to put it in.
+ *
+ * Which is the wrong way round for that screen. Somebody deciding whether a
+ * scope needs its own limit needs to know what it spends, and the rows with
+ * no limit yet are exactly the ones where that is the question. The blanks
+ * were on the only rows anybody was there to think about.
+ *
+ * So spend is asked on its own terms, of every type, whether or not anything
+ * caps it. Same currency handling as the budget arithmetic: converted where
+ * the server could, counted at face value where it could not, and the ones it
+ * could not convert reported separately rather than summed in at nothing.
+ */
+function spendByType(person) {
+  const ccy = orgCurrency();
+  const period = (ORG_PROFILE.budgets || {}).period || "month";
+  const subs = submittedBy(person.name, period);
+  const mine = subs.filter(s => evaluate(s).currency === ccy
+                                || budgetValue(s) !== null);
+  const amount = (s) => {
+    const converted = budgetValue(s);
+    return converted === null ? evaluate(s).receiptTotal : converted;
+  };
+  const types = {};
+  mine.forEach(s => {
+    const id = workingCopy(s).type;
+    types[id] = (types[id] || 0) + amount(s);
+  });
+  return { ccy, period, types,
+           total: mine.reduce((t, s) => t + amount(s), 0),
+           // Both halves of the conversion caveat the editor prints: what was
+           // converted to get it into one currency, and what could not be and
+           // is therefore in none of the figures above.
+           converted: mine.filter(s => budgetValue(s) !== null).length,
+           other: subs.length - mine.length };
+}
+
 function budgetLines(person) {
   const b = budgetFor(person);
   if (!b.hasAny) return null;
@@ -8775,7 +8817,7 @@ function renderBudgets() {
   // ---- editor ----
   const ed = $("bud-editor"); ed.textContent = "";
   const person = budScope.startsWith("p:") ? PEOPLE.find(p => p.email === budScope.slice(2)) : null;
-  const spend = person ? budgetLines(person) : null;
+  const spend = person ? spendByType(person) : null;
 
   const title = document.createElement("p");
   title.className = "hint"; title.style.margin = "0 0 6px";
@@ -8845,9 +8887,17 @@ function renderBudgets() {
       renderBudgets(); renderNav();
     });
 
+    /* Every row, including the ones with no limit.
+     *
+     * A nought here is an answer - "they have spent nothing on this" - and a
+     * blank is not; it used to mean "this type has no limit anywhere, so
+     * there was no line to look the figure up in", which nobody could have
+     * read off the screen. */
     const used = document.createElement("div"); used.className = "spent";
-    const spent = spend && spend.lines.find(l => l.id === row.id);
-    used.textContent = spent ? `${fmt(spent.spent, spend.ccy)} used` : "";
+    const amount = !spend ? null
+      : row.id === "__total" ? spend.total
+      : (spend.types[row.id] || 0);
+    used.textContent = amount === null ? "" : `${fmt(amount, spend.ccy)} used`;
 
     line.append(label, input, used); ed.appendChild(line);
   });
