@@ -5229,6 +5229,13 @@ function renderTriage() {
   // queued and not decided" counted a companion document, and a claim still
   // being read, as work the agent had cleared.
   const cleared = period.filter(autoCleared).length;
+  /* `period`, not a narrowed copy of it.
+   *
+   * `autoClearRate` drops the refused and the withdrawn itself, and the three
+   * counts beside it must not: "decided by you" is the human work done, and a
+   * rejection is some of the most deliberate of it. Narrowing the list here
+   * would have taken those decisions out of the count that exists to show
+   * them. */
   const rate = autoClearRate(period);
   $("t-cleared").textContent = cleared;
   $("t-queued").textContent = queued;
@@ -8297,8 +8304,27 @@ function claimStage(sub) {
  * cleared, because neither is a claim anybody is being paid for.
  */
 const autoCleared = (sub) => claimStage(sub).kind === "agent";
-const autoClearRate = (subs) =>
-  subs.length ? Math.round(subs.filter(autoCleared).length / subs.length * 100) : 0;
+
+/* And the denominator is the claims that turned out to be real.
+ *
+ * A refused or withdrawn claim was in it. The argument for keeping it there
+ * was that a claim a reviewer rejected is work a human did, so dropping it
+ * flatters the agent - and that is true of a rejection, which is a judgment
+ * somebody had to make. It is not true of a withdrawal, which the submitter
+ * took back before anybody judged anything, and it is the wrong frame for
+ * both: this rate is asked to answer "how much of the real work does the
+ * agent take off a person", and a claim nobody is being paid for was not
+ * work. The duplicate the agent flagged and a reviewer killed is the system
+ * doing its job, counted as a failure.
+ *
+ * `LIVE_STAGES_OUT` is the same pair every money figure on Reports now
+ * excludes, so there is one answer on the page to "which claims count".
+ */
+const autoClearRate = (subs) => {
+  const real = subs.filter(s => !LIVE_STAGES_OUT.includes(claimStage(s).stage));
+  return real.length
+    ? Math.round(real.filter(autoCleared).length / real.length * 100) : 0;
+};
 
 /* ---------- reports ---------- */
 
