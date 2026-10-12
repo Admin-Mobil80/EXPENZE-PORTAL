@@ -2247,7 +2247,16 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
 
   <div id="view-settled" style="display:none;flex-direction:column;gap:20px">
     <nav class="subtabs" id="s-subtabs" aria-label="Settlement history">
-      <span class="tabaside">showing <select id="done-period" class="ccysel"></select></span>
+      <!-- One box for all three sections, in the strip that already governs
+           them. Seventy-one settled claims and growing is a list finance
+           reads by scrolling, and the thing they are looking for is usually
+           one of four: a person, a shop, a claim number somebody quoted at
+           them, or the reference on a bank line. -->
+      <span class="tabaside">
+        <input type="search" id="done-find" class="payfind"
+               placeholder="Search" aria-label="Search settled claims"
+               autocomplete="off">
+        showing <select id="done-period" class="ccysel"></select></span>
     </nav>
 
     <div class="rsec" id="ssec-claims">
@@ -10604,22 +10613,56 @@ function inSettledRange(sub) {
   return on >= from.toISOString().slice(0, 10);
 }
 
+/* What finance is looking for in a list of seventy-one settled claims.
+ *
+ * Four things, and they do not know in advance which one they have: a person,
+ * a shop, a claim number somebody quoted at them, or the reference printed on
+ * a bank line they are reconciling against. One box that matches any of them
+ * beats four labelled filters, because the question is "find this", not
+ * "filter by field" - and a finance executive holding a statement has the
+ * UTR, not the column it lives in.
+ *
+ * Every word has to match, in any field and in any order: "apple lakshmi"
+ * finds the Apple invoice of Lakshmikanth's without either word being a
+ * prefix of anything. Matching the whole phrase against each field would miss
+ * it, and matching any one word would return half the list.
+ */
+function settledFind() {
+  const box = $("done-find");
+  return (box ? box.value : "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** Whether one row answers the search. `haystack` is whatever it can be found by. */
+function matchesFind(terms, ...haystack) {
+  if (!terms.length) return true;
+  const hay = haystack.filter(Boolean).join(" ").toLowerCase();
+  return terms.every(t => hay.includes(t));
+}
+
 function renderSettledTabs() {
   const nav = $("s-subtabs");
-  // The period control lives in this strip because it governs both sections;
-  // it is lifted out and put back rather than rebuilt with them.
+  /* Only the buttons are rebuilt. The aside is left where it is.
+   *
+   * It used to be lifted out and put back, which is the same thing as far as
+   * the markup is concerned and not at all the same thing for the search box
+   * now living in it: `nav.textContent = ""` detaches the aside, and
+   * detaching an element that contains the focus sends the focus to the body.
+   * Re-appending does not bring it back. So every keystroke re-rendered the
+   * list and dropped the cursor out of the box being typed in - one character
+   * per click, which is the kind of thing that makes somebody stop using a
+   * feature rather than report it.
+   */
   const aside = nav.querySelector(".tabaside");
-  nav.textContent = "";
+  nav.querySelectorAll("button").forEach(b => b.remove());
   SETTLED_SECTIONS.forEach(([id, label]) => {
     const b = document.createElement("button");
     b.type = "button"; b.textContent = label;
     b.setAttribute("aria-current", String(settledSection === id));
     b.addEventListener("click", () => { settledSection = id; renderSettled(); });
-    nav.appendChild(b);
+    nav.insertBefore(b, aside);
     const sec = $("ssec-" + id);
     if (sec) sec.hidden = settledSection !== id;
   });
-  if (aside) nav.appendChild(aside);
 
   const sel = $("done-period"); sel.textContent = "";
   settledRanges().forEach(([value, label]) => {
@@ -10629,6 +10672,25 @@ function renderSettledTabs() {
     sel.appendChild(o);
   });
   sel.onchange = () => { settledRange = sel.value; renderSettled(); };
+
+  /* Wired once, on an element the tab strip keeps.
+   *
+   * `renderSettledTabs` rebuilds the buttons and lifts the aside out and puts
+   * it back rather than recreating it, so this input survives a render and
+   * the listener on it survives with it. A listener added per render would be
+   * added again on every keystroke.
+   *
+   * `onsearch` as well as `oninput`: clicking the X in a search field fires
+   * only the first, and a box that still filters after it has been visibly
+   * cleared is the worst of both.
+   */
+  const find = $("done-find");
+  if (find && !find.dataset.wired) {
+    find.dataset.wired = "1";
+    const again = () => renderSettled();
+    find.addEventListener("input", again);
+    find.addEventListener("search", again);
+  }
 }
 
 /* Claims somebody refused to pay.
@@ -10657,7 +10719,15 @@ const rejectedInstant = (sub) =>
   Math.max(Number((sub.review || {}).at || 0), Number(sub.rejectedAt || 0));
 
 function renderRejected() {
-  const rejected = SUBMISSIONS.filter(sub => claimStage(sub).stage === "rejected");
+  const find = settledFind();
+  const rejected = SUBMISSIONS.filter(sub => claimStage(sub).stage === "rejected")
+    // The reason is searchable here and nowhere else: it is the column that
+    // makes a refusal reviewable, and "claimed too late" is a thing finance
+    // goes looking for across a quarter.
+    .filter(sub => matchesFind(find, sub.who, sub.whoEmail, sub.vendor,
+                               sub.reference,
+                               (decisions[sub.id] || {}).reason,
+                               (sub.review || {}).reason));
   const shown = rejected.filter(sub => inSettledRange(sub));
   const hidden = rejected.length - shown.length;
   $("rej-sub").textContent = (shown.length
@@ -10667,8 +10737,9 @@ function renderRejected() {
   const tb = $("rejlist"); tb.textContent = "";
   if (!shown.length) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="6" class="empty">${rejected.length
-      ? "Nothing rejected in this period. Widen it above."
+    tr.innerHTML = `<td colspan="6" class="empty">${
+      find.length ? "No rejected claim matches that search."
+      : rejected.length ? "Nothing rejected in this period. Widen it above."
       : "Nothing has been rejected."}</td>`;
     tb.appendChild(tr);
     return;
@@ -10727,8 +10798,17 @@ function settledInstant(sub, payment) {
 function renderSettled() {
   renderSettledTabs();
   renderRejected();
+  const find = settledFind();
   const claims = payableClaims();
-  const all = claims.filter(c => c.outstanding === 0 && c.paid > 0);
+  /* Narrowed above the count as well as the list.
+   *
+   * Three figures describing everybody over a list showing one is the shape
+   * of bug this console has been bitten by twice, so the heading says "4 of
+   * 71" rather than redefining what seventy-one means. */
+  const all = claims.filter(c => c.outstanding === 0 && c.paid > 0)
+    .filter(c => matchesFind(find, c.sub.who, c.sub.whoEmail, c.sub.vendor,
+                             c.sub.reference,
+                             ((settlements[c.sub.id] || []).slice(-1)[0] || {}).txn));
   // Newest first. `seq` breaks a tie between two recorded in one session,
   // which is the only case where the stamped second is not enough.
   const done = all.filter(c => inSettledRange(c.sub)).sort((x, y) => {
@@ -10747,8 +10827,9 @@ function renderSettled() {
     const tr = document.createElement("tr");
     // Seven, since the settled date became a column of its own. A row that
     // spans the wrong number sits under the wrong columns.
-    tr.innerHTML = `<td colspan="7" class="empty">${all.length
-      ? "Nothing settled in this period. Widen it above."
+    tr.innerHTML = `<td colspan="7" class="empty">${
+      find.length ? "Nothing settled matches that search."
+      : all.length ? "Nothing settled in this period. Widen it above."
       : "Nothing settled yet. Claims appear here once paid in full."}</td>`;
     tb.appendChild(tr);
   }
@@ -10802,9 +10883,15 @@ function renderSettled() {
   Object.entries(settlements).forEach(([id, list]) => {
     const sub = SUBMISSIONS.find(s => s.id === id);
     // Same window as the claims list above; the control sits in the tab strip
-    // precisely so it governs both.
+    // precisely so it governs both. The search does too.
     if (!sub || !inSettledRange(sub)) return;
-    list.forEach(p => entries.push({ ...p, sub }));
+    list.forEach(p => {
+      // A log line carries what a claim does and two things it does not: the
+      // bank reference somebody is reconciling against, and how it was paid.
+      if (!matchesFind(find, sub.who, sub.whoEmail, sub.vendor, sub.reference,
+                       p.txn, p.mode, p.note, personName(p.by))) return;
+      entries.push({ ...p, sub });
+    });
   });
   entries.sort((a, b) =>
     settledInstant(b.sub, b) - settledInstant(a.sub, a) || (b.seq || 0) - (a.seq || 0));
@@ -10817,7 +10904,9 @@ function renderSettled() {
   if (!entries.length) {
     const p = document.createElement("p");
     p.className = "empty";
-    p.textContent = "No reimbursements recorded. Settling a claim above writes an entry here.";
+    p.textContent = find.length
+      ? "No payment matches that search."
+      : "No reimbursements recorded. Settling a claim above writes an entry here.";
     lg.appendChild(p);
   }
   entries.forEach(e => {
