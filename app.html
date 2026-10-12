@@ -2128,7 +2128,12 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
            waiting gets one transfer, so the list has to be able to become
            that person's list - and then the total above it is the figure
            that goes on the transfer. -->
-        <input type="search" id="pay-who" class="payfind" placeholder="Filter by submitter" aria-label="Filter by submitter" autocomplete="off">
+        <!-- A submitter filter, widened to a search. Finance narrowing to one
+             person to settle them together is still what it is mostly for -
+             the batch button depends on that - but somebody chasing a
+             particular bill has the vendor or the claim number, and was
+             typing them into a box that only knew names. -->
+        <input type="search" id="pay-who" class="payfind" placeholder="Search" aria-label="Search claims awaiting payment" autocomplete="off">
         <button class="btn" type="button" id="pay-print">Print all bills</button>
         <button class="btn primary" type="button" id="pay-batch" hidden>Settle together</button></header>
       <p class="msg paymsg batchwhy" id="pay-batch-why" hidden></p>
@@ -10211,10 +10216,17 @@ function renderPayments() {
    * this console has been bitten by twice.
    */
   const whoBox = $("pay-who");
-  const findWho = (whoBox ? whoBox.value : "").trim().toLowerCase();
-  const matchesWho = (c) => !findWho
-    || String(c.sub.who || "").toLowerCase().includes(findWho)
-    || String(c.sub.whoEmail || "").toLowerCase().includes(findWho);
+  const findWho = (whoBox ? whoBox.value : "").trim();
+  /* The same matcher the Settled tab uses, over what this list can be found
+   * by: who is owed, what they bought, and the claim number somebody quoted.
+   *
+   * No bank reference here, unlike Settled - nothing on this list has been
+   * paid, so there is no statement line to reconcile against yet. That is
+   * exactly the difference between the two screens.
+   */
+  const terms = findWho.toLowerCase().split(/\s+/).filter(Boolean);
+  const matchesWho = (c) => matchesFind(terms, c.sub.who, c.sub.whoEmail,
+                                        c.sub.vendor, c.sub.reference);
 
   /* Oldest first. This is a queue of people waiting for their own money.
    *
@@ -10381,7 +10393,7 @@ function renderPayments() {
         + "somebody else."
       : !onePayee
       ? `These claims are ${payees.size} people's. Tick the rows you are `
-        + "paying, or filter by submitter — a transfer goes to somebody."
+        + "paying, or search for one person — a transfer goes to somebody."
       : payableNow.length === 1
       ? "Only one of these can be paid yet; the rest need an expense type or "
         + "a cost centre. Settle it on its own row."
@@ -10452,9 +10464,9 @@ function renderPayments() {
     // columns.
     tr.innerHTML = `<td colspan="${anyPartPaid ? 10 : 8}" class="empty">`
       + (findWho
-         ? `Nobody matching &ldquo;${esc(findWho)}&rdquo; is owed anything. `
+         ? `Nothing awaiting payment matches &ldquo;${esc(findWho)}&rdquo;. `
            + `${awaitingAll.length} claim${awaitingAll.length === 1 ? " is" : "s are"} `
-           + "waiting under other names."
+           + "waiting."
          : "Nothing awaiting reimbursement. Cleared claims land here until they are paid.")
       + "</td>";
     tb.appendChild(tr);
@@ -10579,7 +10591,7 @@ function renderPayments() {
     payAll.checked = !!mine.length && mine.every(c => payPicked.has(c.sub.id));
     payAll.title = mine.length
       ? `Select every claim of ${who}'s that can be paid`
-      : "Filter by submitter, or tick one row, to select a person's claims";
+      : "Search for one person, or tick one row, to select a person's claims";
   }
   wireClaimRows(tb);
 }
