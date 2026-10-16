@@ -2217,7 +2217,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
                separate payout reimburses them without touching the float, and
                folding the two together is how a replenishment gets
                calculated against a balance that never moved. -->
-          <th scope="col" style="text-align:right">Settled from it</th>
+          <th scope="col" style="text-align:right">Settled against advance</th>
           <!-- Spent and not yet settled: the cash has left their hands and the
                advance has not been drawn down for it. It is exactly the gap
                between in hand and still out, so without it in hand moves for
@@ -2266,10 +2266,10 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <div><span class="k">In hand</span><span class="v" id="advd-hand"></span>
         <span class="note">Still out, less anything spent and waiting to be settled.</span></div>
       <div><span class="k">Still out</span><span class="v" id="advd-out"></span>
-        <span class="note">Advanced, less returned, less settled from it.</span></div>
+        <span class="note">Advanced, less returned, less settled against it.</span></div>
       <div><span class="k">Advanced</span><span class="v" id="advd-adv"></span>
         <span class="note">Cash handed over, less anything given back.</span></div>
-      <div><span class="k">Settled from it</span><span class="v" id="advd-drawn"></span>
+      <div><span class="k">Settled against advance</span><span class="v" id="advd-drawn"></span>
         <span class="note">Claims accounted for out of the advance.</span></div>
       <div><span class="k">In flight</span><span class="v" id="advd-flight"></span>
         <span class="note">Spent by them and not yet settled.</span></div>
@@ -4793,7 +4793,7 @@ function goTo(id, claimId) {
   // A drill-down belongs to the visit, not to the tab. Leaving Advances and
   // coming back later should land on the list of holders rather than on
   // whoever happened to be open last time.
-  if (id !== "advances") floatHolder = null;
+  if (id !== "advances") { floatHolder = null; floatLedgerAll = false; }
   view = id;
   viewChosen = true;
   if (claimId) selectedId = claimId;
@@ -11204,9 +11204,9 @@ function settleForm(c, ccy) {
             // rate it was struck at without opening anything.
             c.rate ? ` ${esc(fmt(c.original, c.from))} at ${esc(c.rate)}.` : ""
           } Lower it to part settle.</span></div>
-        <div class="sf" id="sf-source-wrap" hidden><label for="sf-source">Settle from</label>
+        <div class="sf" id="sf-source-wrap" hidden><label for="sf-source">Settle against</label>
           <select id="sf-source">
-            <option value="float">Their float</option>
+            <option value="float">Their advance</option>
             <option value="payout">A separate payout</option>
           </select>
           <span class="sf-hint" id="sf-source-hint"></span></div>
@@ -11272,7 +11272,7 @@ function settleForm(c, ccy) {
     const minor = Math.round(parseFloat(amtBox.value || "0") * 100);
     /* Only when the control is actually on screen.
      *
-     * The select is built with "Their float" as its first option and starts
+     * The select is built with "Their advance" as its first option and starts
      * inside a hidden wrapper, so reading its value before the block that
      * reveals it has run says "float" for somebody who holds no float at all
      * - and that would have waived the reference requirement for everybody. */
@@ -11286,7 +11286,7 @@ function settleForm(c, ccy) {
     goBtn.disabled = !(minor > 0) || (!onFloat && !ref);
     goBtn.textContent = !(minor > 0) ? "Enter an amount"
       : (!onFloat && !ref) ? "Enter the transaction reference"
-      : onFloat ? `Set ${fmt(Math.min(minor, c.outstanding), ccy)} against the float`
+      : onFloat ? `Set ${fmt(Math.min(minor, c.outstanding), ccy)} against the advance`
       : `Record ${fmt(Math.min(minor, c.outstanding), ccy)} as paid`;
   };
   amtBox.addEventListener("input", nameTheAmount);
@@ -11319,7 +11319,7 @@ function settleForm(c, ccy) {
 
   /* Where this one comes from, when the claimant is holding a float.
    *
-   * Two genuinely different acts wearing one word. Settling *from the float*
+   * Two genuinely different acts wearing one word. Settling *against the advance*
    * moves no money: they already spent the company's cash, and this is the
    * company accounting for it, so their advance is drawn down. A *separate
    * payout* is an ordinary reimbursement - a bill too large for the float, or
@@ -11357,7 +11357,7 @@ function settleForm(c, ccy) {
     sel.value = fits ? "float" : "payout";
     /* The rest of the row follows the choice.
      *
-     * Settling from the float moves no money, so every field that describes a
+     * Settling against the advance moves no money, so every field that describes a
      * transfer is describing one that did not happen. "Bank transfer" and a
      * UTR on a float adjustment are not merely redundant - they send the
      * holder to their statement looking for a payment nobody made, and they
@@ -11375,7 +11375,7 @@ function settleForm(c, ccy) {
         ? `No money moves. It draws the advance down from `
           + `${fmt(stillOut, fccy)} to ${fmt(stillOut - c.outstanding, fccy)}`
           + (over ? " \u2014 more than was advanced." : ".")
-        : `Reimbursed on top of the float, which stays at `
+        : `Reimbursed on top of the advance, which stays at `
           + `${fmt(stillOut, fccy)}.`;
       hint.style.color = onFloat && over ? "var(--warn)" : "var(--muted)";
 
@@ -11623,16 +11623,16 @@ function batchForm(claims, ccy, held) {
     /* The choice, only for somebody who holds a float.
      *
      * The single settlement form has always worked this way and this one did
-     * not: it offered "Their float" to everybody, so a person who had never
+     * not: it offered "Their advance" to everybody, so a person who had never
      * been given an advance could have four claims drawn down against a float
      * that does not exist. For everybody else there is no choice to make, and
      * a dropdown with one real option is furniture that can be got wrong.
      *
      * Kept in the markup either way, hidden, so the reader below can find it
      * without caring whether it was drawn. */
-    + `<div class="sf"${holdsFloat ? "" : " hidden"}><label for="bf-src">Settle from</label>`
+    + `<div class="sf"${holdsFloat ? "" : " hidden"}><label for="bf-src">Settle against</label>`
     + `<select id="bf-src"><option value="payout">A separate payout</option>`
-    + (holdsFloat ? `<option value="float">Their float</option>` : "")
+    + (holdsFloat ? `<option value="float">Their advance</option>` : "")
     + `</select></div>`
     + `<div class="sf"><label for="bf-mode">Mode</label>`
     + `<select id="bf-mode">${["bank transfer", "UPI", "cash", "cheque", "card"]
@@ -11663,7 +11663,7 @@ function batchForm(claims, ccy, held) {
     ref.placeholder = float ? "Not needed — no transfer was made" : "UTR / cheque no.";
     box.querySelector("#bf-mode").disabled = float;
     hint.textContent = float
-      ? `Drawn from ${who}'s float. No payment is made; their advance falls by `
+      ? `Drawn from ${who}'s advance. No payment is made; it falls by `
         + `${fmt(owed, ccy)}.`
       : "The submitter is emailed once, naming every claim this covers.";
   };
@@ -12366,6 +12366,18 @@ let ADVANCES = { currency: "", holders: [], movements: [] };
 let advFormOpen = false;
 /** The float holder whose own page is open, by email, or null for the list. */
 let floatHolder = null;
+/* How many of a holder's movements the ledger opens with, and whether the
+ * reader has asked for the rest.
+ *
+ * Oldest-first is what makes the balance column readable - each line is the
+ * line above it plus or minus that line's amount - and it puts the newest
+ * movements at the bottom, which is fine at twelve and useless at two
+ * hundred. A statement solves this the same way every bank does: show a
+ * window of recent movements opened by a brought-forward balance, so the
+ * page lands on what is recent, still reads downwards, and is honest about
+ * what it is not showing. */
+const LEDGER_WINDOW = 25;
+let floatLedgerAll = false;
 
 async function loadAdvances() {
   /* Fetched for everybody now, not only for whoever can see the whole float.
@@ -12430,10 +12442,10 @@ function renderAdvances() {
   $("adv-banner").innerHTML = rw
     ? `<strong>Recording as ${currentUser.name}.</strong><span>Logging an advance `
       + `records the cash handed over; it does not move money on its own. A `
-      + `claim settled <em>from the float</em> draws it down and moves no `
+      + `claim settled <em>against the advance</em> draws it down and moves no `
       + `money; one settled as a separate payout reimburses them and leaves `
-      + `the float alone. Still out = advanced \u2212 returned \u2212 settled `
-      + `from it; in hand is that less anything spent and waiting to be `
+      + `the advance alone. Still out = advanced \u2212 returned \u2212 settled `
+      + `against it; in hand is that less anything spent and waiting to be `
       + `settled.</span>`
     : `<strong>Read-only.</strong><span>The float is a Finance Executive's to record.</span>`;
 
@@ -12578,19 +12590,27 @@ function renderFloatHolder(h, ccy) {
   let balance = stillOut;
   mine.forEach(m => { after.set(m, balance); balance -= floatEffect(m); });
 
-  const capped = (ADVANCES.movements || []).length >= 200;
+  // The window: the newest `LEDGER_WINDOW`, unless the reader asked for all.
+  const windowed = !floatLedgerAll && mine.length > LEDGER_WINDOW;
+  const shown = windowed ? mine.slice(0, LEDGER_WINDOW) : mine;
+  /* What the first line shown opens at: the balance before the oldest row in
+   * the window, which is what a statement calls the brought-forward figure.
+   *
+   * `after` holds the balance *after* each movement, so the balance before
+   * the oldest row shown is that row's own figure less what that row did.
+   * This is what lets a window of a ledger add up on its own rather than
+   * starting at a number with no explanation. */
+  const oldestShown = shown[shown.length - 1];
+  const brought = oldestShown
+    ? (after.get(oldestShown) || 0) - floatEffect(oldestShown)
+    : 0;
+
   $("advd-banner").innerHTML =
     `<strong>${esc(h.name || h.email)} is carrying ${esc(fmt(inHand, hccy))}.</strong>`
-    + `<span>Every movement of this person's float, oldest first, ending on `
-    + `the figure above. <em>Still out</em> is the balance after each one, so `
-    + `each line is the line before it plus or minus that line's amount. A `
-    + `claim in flight has not drawn the advance down yet, so it leaves the `
-    + `balance where it was.`
-    + (capped
-       ? ` Only the most recent movements are shown, so the first line here `
-         + `may not be the first advance and its balance may not open at nil.`
-       : "")
-    + `</span>`;
+    + `<span>Oldest first, ending on the figure above. <em>Still out</em> is `
+    + `the balance after each movement, so each line is the line before it `
+    + `plus or minus that line's amount. A claim in flight has not drawn the `
+    + `advance down yet, so it leaves the balance where it was.</span>`;
 
   const log = $("advd-log"); log.textContent = "";
   $("advd-sub").textContent =
@@ -12598,7 +12618,7 @@ function renderFloatHolder(h, ccy) {
   if (!mine.length) {
     const tr = document.createElement("tr");
     tr.innerHTML = '<td colspan="6" class="empty">Nothing recorded against this '
-      + 'float yet.</td>';
+      + 'advance yet.</td>';
     log.appendChild(tr);
     return;
   }
@@ -12621,7 +12641,25 @@ function renderFloatHolder(h, ccy) {
    * The current figure does not need to be at the top of the ledger because
    * it is already in the tile above it - the tile carries the answer, the
    * ledger carries the working, and it now ends on that same figure. */
-  mine.slice().reverse().forEach(m => {
+  // The line a statement opens with when it does not start at the beginning.
+  // Without it the first balance in the column is a number the rows above it
+  // cannot account for, which is the thing a brought-forward figure exists to
+  // prevent.
+  if (windowed) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td class="day">—</td>`
+      + `<td colspan="2" style="color:var(--muted)">Balance brought forward`
+      + `<span class="gid" style="margin-left:7px">`
+      + `${mine.length - shown.length} earlier movement`
+      + `${mine.length - shown.length === 1 ? "" : "s"}</span></td>`
+      + `<td class="n" style="color:var(--muted);font-weight:600">`
+      + `${esc(fmt(brought, hccy))}</td>`
+      + `<td></td><td></td>`;
+    log.appendChild(tr);
+  }
+
+  shown.slice().reverse().forEach(m => {
     // The five-column row, which is this one without the Holder column - the
     // whole page is one holder, so naming them on every line is noise.
     const tr = floatRow(m, hccy, 5);
@@ -12636,6 +12674,21 @@ function renderFloatHolder(h, ccy) {
     tr.insertBefore(cell, tr.children[3]);
     log.appendChild(tr);
   });
+
+  if (windowed) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "empty";
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "linkish";
+    more.textContent = `Show all ${mine.length} movements`;
+    more.addEventListener("click", () => { floatLedgerAll = true; renderAdvances(); });
+    td.appendChild(more);
+    tr.appendChild(td);
+    log.appendChild(tr);
+  }
 }
 
 /** Record cash handed over, or handed back. */
@@ -14316,10 +14369,14 @@ $("adv-list").addEventListener("click", (e) => {
   const pick = e.target.closest("[data-holder]");
   if (!pick) return;
   floatHolder = pick.dataset.holder || null;
+  // Each holder opens on their recent movements, however far the last one
+  // was expanded.
+  floatLedgerAll = false;
   renderAdvances();
 });
 $("advd-back").addEventListener("click", () => {
   floatHolder = null;
+  floatLedgerAll = false;
   renderAdvances();
 });
 $("rules-save").addEventListener("click", () => saveRules("rules-save", "rules-msg"));
