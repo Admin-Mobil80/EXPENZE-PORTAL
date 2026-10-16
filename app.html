@@ -2194,7 +2194,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
         <span class="note">Spent by a holder and not yet settled.</span></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="adv-float">
       <header><h2>The float</h2><span class="sub" id="adv-sub"></span></header>
       <div class="banner" id="adv-banner"></div>
       <div class="items-scroll">
@@ -2239,7 +2239,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
       <div id="adv-form" hidden></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="adv-moves">
       <header><h2>Movements</h2><span class="sub" id="adv-log-sub"></span></header>
       <div class="items-scroll">
         <table><thead><tr>
@@ -2250,6 +2250,46 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
           <th scope="col">Recorded by</th>
           <th scope="col">Note</th>
         </tr></thead><tbody id="adv-log"></tbody></table>
+      </div>
+    </section>
+
+    <!-- One holder's page. The float table answers "who is carrying what";
+         this answers "what happened to this person's cash", which is the
+         question somebody reconciling an envelope actually has and which was
+         previously a matter of reading the whole ledger and filtering it by
+         eye. -->
+    <div class="formrow" id="advd-nav" style="display:none">
+      <button class="btn back" type="button" id="advd-back">&larr; All float holders</button>
+    </div>
+
+    <section class="tiles4" id="advd-tiles" style="display:none">
+      <div><span class="k">In hand</span><span class="v" id="advd-hand"></span>
+        <span class="note">Still out, less anything spent and waiting to be settled.</span></div>
+      <div><span class="k">Still out</span><span class="v" id="advd-out"></span>
+        <span class="note">Advanced, less returned, less settled from it.</span></div>
+      <div><span class="k">Advanced</span><span class="v" id="advd-adv"></span>
+        <span class="note">Cash handed over, less anything given back.</span></div>
+      <div><span class="k">Settled from it</span><span class="v" id="advd-drawn"></span>
+        <span class="note">Claims accounted for out of the advance.</span></div>
+      <div><span class="k">In flight</span><span class="v" id="advd-flight"></span>
+        <span class="note">Spent by them and not yet settled.</span></div>
+    </section>
+
+    <section class="panel" id="advd-panel" style="display:none">
+      <header><h2 id="advd-name"></h2><span class="sub" id="advd-sub"></span></header>
+      <div class="banner" id="advd-banner"></div>
+      <div class="items-scroll">
+        <table><thead><tr>
+          <th scope="col">When</th>
+          <th scope="col">What</th>
+          <th scope="col" style="text-align:right">Amount</th>
+          <!-- Still out after this movement, which is what makes the ledger
+               reconcile to the tile above instead of being a list somebody
+               has to add up themselves. -->
+          <th scope="col" style="text-align:right">Still out</th>
+          <th scope="col">Recorded by</th>
+          <th scope="col">Note</th>
+        </tr></thead><tbody id="advd-log"></tbody></table>
       </div>
     </section>
   </div>
@@ -4750,6 +4790,10 @@ const TAB_LABEL = {
  * or past the end of a short one - which reads as a jump.
  */
 function goTo(id, claimId) {
+  // A drill-down belongs to the visit, not to the tab. Leaving Advances and
+  // coming back later should land on the list of holders rather than on
+  // whoever happened to be open last time.
+  if (id !== "advances") floatHolder = null;
   view = id;
   viewChosen = true;
   if (claimId) selectedId = claimId;
@@ -12320,6 +12364,8 @@ const usd = (n) => "$" + n.toLocaleString("en-US");
  */
 let ADVANCES = { currency: "", holders: [], movements: [] };
 let advFormOpen = false;
+/** The float holder whose own page is open, by email, or null for the list. */
+let floatHolder = null;
 
 async function loadAdvances() {
   /* Fetched for everybody now, not only for whoever can see the whole float.
@@ -12340,10 +12386,31 @@ async function loadAdvances() {
 /** Decimal strings from the server, in the minor units this page works in. */
 const advMinor = (v) => Math.round(parseFloat(v || "0") * 100) || 0;
 
+/** `display`, not the `hidden` attribute.
+ *
+ * `.tiles4` sets `display:grid` and `.panel` sets its own display, and a class
+ * rule beats the user agent's `[hidden] { display:none }`. Hiding these with
+ * the attribute leaves them on screen, which is the kind of bug that looks
+ * like the render never ran. */
+const advShow = (id, on) => { const el = $(id); if (el) el.style.display = on ? "" : "none"; };
+
 function renderAdvances() {
   const ccy = ADVANCES.currency || orgCurrency();
   const holders = ADVANCES.holders || [];
   const rw = can.seeQueue();
+
+  const viewing = floatHolder
+    ? holders.find(h => String(h.email || "").toLowerCase() === floatHolder)
+    : null;
+  // Asked for somebody who is not a holder any more - the ledger reloaded and
+  // their balance went to nothing, or this reader's scope narrowed. The list
+  // is a better answer than a page about a person who is not on it.
+  if (floatHolder && !viewing) floatHolder = null;
+
+  const one = !!viewing;
+  ["advd-nav", "advd-tiles", "advd-panel"].forEach(id => advShow(id, one));
+  ["adv-tiles", "adv-float", "adv-moves"].forEach(id => advShow(id, !one));
+  if (one) { renderFloatHolder(viewing, ccy); return; }
 
   const sum = (f) => holders.reduce((t, h) => t + f(h), 0);
   const out = sum(h => advMinor(h.held));
@@ -12406,7 +12473,12 @@ function renderAdvances() {
                : inHand < 0 ? "var(--warn)"
                : inHand === 0 ? "var(--muted)" : "var(--ok)";
     tr.innerHTML =
-      `<td><div class="pname">${esc(h.name || h.email)}</div>` +
+      // The name opens their own page. A button rather than a styled span so
+      // it is reachable by keyboard and announced as something that does
+      // something, which a `div` with a click handler is not.
+      `<td><button class="linkish pname" type="button" ` +
+        `data-holder="${esc(String(h.email || "").toLowerCase())}">` +
+        `${esc(h.name || h.email)}</button>` +
         `<div class="pmeta">${esc(h.email)}</div></td>` +
       `<td class="n" style="color:${tone};font-weight:600">${fmt(inHand, hccy)}</td>` +
       `<td class="n">${fmt(advMinor(h.advanced) - advMinor(h.returned), hccy)}</td>` +
@@ -12443,6 +12515,107 @@ function renderAdvances() {
   moves.forEach(m => log.appendChild(floatRow(m, ccy, 6)));
 
   paintAdvanceForm();
+}
+
+/** What a movement does to the balance that is still out.
+ *
+ * A claim in flight does nothing to it yet. The holder has spent the cash,
+ * but nobody has said whether the float accounts for it or a separate payout
+ * reimburses them, and until somebody does the advance has not been drawn
+ * down. Giving it a sign here would make the column disagree with the tile
+ * above it, which is the one thing this column exists to prevent.
+ */
+function floatEffect(m) {
+  if (m.kind === "advance") return advMinor(m.amount);
+  if (m.kind === "return" || m.kind === "spent") return -advMinor(m.amount);
+  return 0;
+}
+
+/** One holder's float: their balances, and every movement behind them. */
+function renderFloatHolder(h, ccy) {
+  const hccy = h.currency || ccy;
+  const email = String(h.email || "").toLowerCase();
+  const stillOut = advMinor(h.held);
+  const inHand = advMinor(h.in_hand);
+  const flight = advMinor(h.pending);
+
+  $("advd-name").textContent = h.name || h.email;
+
+  // The same tones as the list, for the same reasons: red is a real overdraw
+  // of the company's cash, amber is a balance that may resolve itself once
+  // finance says which claims come off the float.
+  const tone = stillOut < 0 ? "var(--bad)"
+             : inHand < 0 ? "var(--warn)"
+             : inHand === 0 ? "var(--muted)" : "var(--ok)";
+  const hand = $("advd-hand");
+  hand.textContent = fmt(inHand, hccy);
+  hand.style.color = tone;
+  $("advd-out").textContent = fmt(stillOut, hccy);
+  $("advd-adv").textContent = fmt(advMinor(h.advanced) - advMinor(h.returned), hccy);
+  $("advd-drawn").textContent = fmt(advMinor(h.from_float), hccy);
+  const air = $("advd-flight");
+  air.textContent = fmt(flight, hccy);
+  air.style.color = flight ? "var(--warn)" : "var(--muted)";
+
+  const mine = (ADVANCES.movements || [])
+    .filter(m => String(m.holder || "").toLowerCase() === email);
+
+  /* The running balance is anchored to the figure above it and worked
+   * backwards, rather than accumulated forwards from nothing.
+   *
+   * Forwards is the obvious way and it is wrong whenever the ledger does not
+   * reach back to the first advance - the server returns the most recent two
+   * hundred movements across every holder, so on a busy account a holder's
+   * oldest rows are simply not here. Accumulating from zero would then print
+   * a column that is confidently short by whatever is missing, and the top
+   * row would disagree with the tile.
+   *
+   * Anchoring at `still out` and subtracting each movement going back makes
+   * the newest row true by construction and every older one true relative to
+   * it. What a short ledger costs is the oldest balances, which is the honest
+   * place for the loss. */
+  const after = new Map();
+  let balance = stillOut;
+  mine.forEach(m => { after.set(m, balance); balance -= floatEffect(m); });
+
+  const capped = (ADVANCES.movements || []).length >= 200;
+  $("advd-banner").innerHTML =
+    `<strong>${esc(h.name || h.email)} is carrying ${esc(fmt(inHand, hccy))}.</strong>`
+    + `<span>Every movement of this person's float, newest first. `
+    + `<em>Still out</em> is the balance after each one; a claim in flight has `
+    + `not drawn the advance down yet, so it leaves the balance where it was.`
+    + (capped
+       ? ` The ledger shows the most recent movements only, so the oldest `
+         + `balances here may not reach back to the first advance.`
+       : "")
+    + `</span>`;
+
+  const log = $("advd-log"); log.textContent = "";
+  $("advd-sub").textContent =
+    `${h.email} · ${mine.length} ${mine.length === 1 ? "movement" : "movements"} · ${hccy}`;
+  if (!mine.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6" class="empty">Nothing recorded against this '
+      + 'float yet.</td>';
+    log.appendChild(tr);
+    return;
+  }
+
+  mine.forEach(m => {
+    // The five-column row, which is this one without the Holder column - the
+    // whole page is one holder, so naming them on every line is noise.
+    const tr = floatRow(m, hccy, 5);
+    const cell = document.createElement("td");
+    cell.className = "n";
+    const running = after.get(m) || 0;
+    cell.style.color = running < 0 ? "var(--bad)" : "var(--muted)";
+    cell.textContent = fmt(running, m.currency || hccy);
+    // After Amount, before Recorded by: the balance belongs beside the figure
+    // that moved it. By index rather than `nextSibling`, which would land on
+    // a text node the moment somebody puts a newline in `floatRow`'s markup.
+    tr.insertBefore(cell, tr.children[3]);
+    log.appendChild(tr);
+  });
 }
 
 /** Record cash handed over, or handed back. */
@@ -14114,6 +14287,20 @@ $("adv-new").addEventListener("click", () => {
   advFormOpen = !advFormOpen;
   const msg = $("adv-msg"); if (msg) msg.hidden = true;
   paintAdvanceForm();
+});
+// Delegated once on the tbody, not per row: the float table is rebuilt from
+// scratch on every render, and a listener per name would be re-attached each
+// time. A real <button> carries Enter and Space itself, so there is no
+// keydown handler to go with this one.
+$("adv-list").addEventListener("click", (e) => {
+  const pick = e.target.closest("[data-holder]");
+  if (!pick) return;
+  floatHolder = pick.dataset.holder || null;
+  renderAdvances();
+});
+$("advd-back").addEventListener("click", () => {
+  floatHolder = null;
+  renderAdvances();
 });
 $("rules-save").addEventListener("click", () => saveRules("rules-save", "rules-msg"));
 $("rules-discard").addEventListener("click", () => discardRules("rules-msg"));
