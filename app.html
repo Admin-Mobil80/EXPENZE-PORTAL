@@ -12581,12 +12581,14 @@ function renderFloatHolder(h, ccy) {
   const capped = (ADVANCES.movements || []).length >= 200;
   $("advd-banner").innerHTML =
     `<strong>${esc(h.name || h.email)} is carrying ${esc(fmt(inHand, hccy))}.</strong>`
-    + `<span>Every movement of this person's float, newest first. `
-    + `<em>Still out</em> is the balance after each one; a claim in flight has `
-    + `not drawn the advance down yet, so it leaves the balance where it was.`
+    + `<span>Every movement of this person's float, oldest first, ending on `
+    + `the figure above. <em>Still out</em> is the balance after each one, so `
+    + `each line is the line before it plus or minus that line's amount. A `
+    + `claim in flight has not drawn the advance down yet, so it leaves the `
+    + `balance where it was.`
     + (capped
-       ? ` The ledger shows the most recent movements only, so the oldest `
-         + `balances here may not reach back to the first advance.`
+       ? ` Only the most recent movements are shown, so the first line here `
+         + `may not be the first advance and its balance may not open at nil.`
        : "")
     + `</span>`;
 
@@ -12601,7 +12603,25 @@ function renderFloatHolder(h, ccy) {
     return;
   }
 
-  mine.forEach(m => {
+  /* Oldest first, which is the opposite of every other list in this console
+   * and is right here for the reason the others are not.
+   *
+   * A running balance and a newest-first list are at odds. Shown newest
+   * first, a row's amount explains the gap to the row *below* it rather than
+   * the one above, because reading downwards travels backwards in time - so
+   * an advance of 1,065 sat against a balance 7,000 lower than the line above
+   * it, and a drawdown of 6,785 against one only 1,065 lower. The figures
+   * were right and could not be read.
+   *
+   * A passbook is oldest first precisely so each line is the line before it
+   * plus or minus that line's amount, and this page is a passbook: it exists
+   * to be checked against cash somebody is holding. Latest-on-top belongs to
+   * the queues, where the question is what needs attention now.
+   *
+   * The current figure does not need to be at the top of the ledger because
+   * it is already in the tile above it - the tile carries the answer, the
+   * ledger carries the working, and it now ends on that same figure. */
+  mine.slice().reverse().forEach(m => {
     // The five-column row, which is this one without the Holder column - the
     // whole page is one holder, so naming them on every line is noise.
     const tr = floatRow(m, hccy, 5);
