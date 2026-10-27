@@ -4851,6 +4851,38 @@ function siblingsFor(from) {
   return [];
 }
 
+/** Write a finding's text, turning the claim it names into a way to get there.
+ *
+ * A duplicate finding is the one whose answer is on another claim rather than
+ * on this screen: the reviewer has to look at the other bill to decide whether
+ * this is the same purchase twice or two that happen to match. It printed the
+ * reference as plain text, so answering the question meant copying
+ * "Mobil80-Exp-184" into a search box and losing your place.
+ *
+ * Only linked when the claim is actually loaded. A reference this console
+ * cannot resolve - an older claim outside what was fetched, or one the reader
+ * is not allowed to see - stays plain text rather than becoming a link that
+ * goes nowhere, which is worse than no link at all.
+ */
+function nameTheOtherClaim(into, text, sub) {
+  const ref = String((sub || {}).duplicateOf || "");
+  const at = ref ? String(text).indexOf(ref) : -1;
+  const other = ref ? SUBMISSIONS.find(s => s.reference === ref) : null;
+  if (at < 0 || !other) { into.textContent = text; return; }
+
+  into.append(text.slice(0, at));
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "linkish";
+  link.style.fontFamily = '"IBM Plex Mono",monospace';
+  link.style.textDecoration = "underline";
+  link.textContent = ref;
+  link.title = `Open ${ref}`;
+  link.addEventListener("click", () => openClaim(other.id, view));
+  into.append(link, text.slice(at + ref.length));
+}
+
+
 function openClaim(id, from) {
   claimFrom = from || view;
   claimSiblings = siblingsFor(claimFrom);
@@ -6714,11 +6746,11 @@ function renderDetail() {
       + (v.code === "possible_duplicate" && !wentAway ? " dupe" : "");
     const code = document.createElement("code"); code.textContent = v.code;
     const msg = document.createElement("span"); msg.className="msg";
-    msg.textContent = wentAway
+    nameTheOtherClaim(msg, wentAway
       ? `The same bill was claimed on ${sub.duplicateOf}, and that claim was `
         + `${wentAway === "withdrawn" ? "withdrawn" : "rejected"} — so nothing `
         + "is being paid twice. This one stands on its own."
-      : v.msg;
+      : v.msg, sub);
     /* No minus sign, because nothing is being deducted.
      *
      * This printed "−₹0.00" against every finding, which is what a deduction
