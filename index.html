@@ -127,6 +127,48 @@ h2 {
 h2 em { font-style:italic; color:var(--navy); }
 .lede { color:var(--ink-2); font-size:1.02rem; max-width:64ch; margin:0 0 30px; }
 
+
+/* ---------- demo film ----------
+ *
+ * A facade, not an iframe. An embedded player pulls roughly half a megabyte of
+ * YouTube's JavaScript into every visit and sets cookies before anybody has
+ * asked to watch anything; this loads our own still and only becomes a player
+ * when somebody clicks. The click then goes to youtube-nocookie.com.
+ */
+.demo { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr); gap:40px; align-items:center; }
+@media (max-width:860px){ .demo { grid-template-columns:1fr; gap:26px; } }
+
+.player {
+  position:relative; aspect-ratio:16/9; border:1px solid var(--rule-firm);
+  background:var(--surface-2); overflow:hidden; cursor:pointer; display:block;
+  width:100%; padding:0;
+}
+.player img { width:100%; height:100%; object-fit:cover; display:block; }
+.player iframe { width:100%; height:100%; border:0; display:block; }
+.player .play {
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(to top, rgba(14,20,24,.34), rgba(14,20,24,.06));
+  transition:background .18s ease;
+}
+.player:hover .play { background:linear-gradient(to top, rgba(14,20,24,.46), rgba(14,20,24,.12)); }
+.player .play span {
+  display:flex; align-items:center; gap:12px; padding:13px 22px;
+  background:var(--surface); color:var(--ink); border:1px solid var(--rule-firm);
+  font-family:"IBM Plex Mono",monospace; font-size:.76rem; letter-spacing:.1em;
+  text-transform:uppercase;
+}
+.player .play svg { width:13px; height:15px; fill:var(--green); flex:none; }
+.player:focus-visible { outline:2px solid var(--navy); outline-offset:3px; }
+
+.demo .runtime {
+  font-family:"IBM Plex Mono",monospace; font-size:.72rem; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--muted); margin:12px 0 0;
+}
+.demo ul { list-style:none; padding:0; margin:22px 0 0; }
+.demo li { padding:11px 0; border-top:1px solid var(--rule); color:var(--ink-2); font-size:.95rem; }
+.demo li:first-child { border-top:0; padding-top:0; }
+.demo li b { color:var(--ink); font-weight:600; }
+
 /* ---------- top bar ---------- */
 .topbar {
   display:flex; align-items:center; justify-content:space-between;
@@ -364,6 +406,7 @@ footer .who { font-family:"IBM Plex Mono",monospace; font-size:.73rem; color:var
   <div class="topbar">
     <a class="logo" href="/">Expenze<span class="dot">.</span><span class="tld">expenze.ai</span></a>
     <nav class="topnav">
+      <a href="#demo">Demo</a>
       <a href="#how">How it works</a>
       <a href="#wrong">Accuracy</a>
       <a href="#control">Budgets</a>
@@ -434,6 +477,38 @@ footer .who { font-family:"IBM Plex Mono",monospace; font-size:.73rem; color:var
       </article>
       <p class="billnote">The printed total is what is claimed. A line-by-line reading
         that comes up short is a reason to doubt the reading, not the bill.</p>
+    </div>
+  </section>
+
+
+  <!-- ================= DEMO ================= -->
+  <!-- Placed directly after the hero: the fastest answer to "what is this"
+       is ninety seconds of a real claim going in and coming back audited. -->
+  <section id="demo">
+    <p class="marker">See it work</p>
+    <h2>A real claim, <em>start to finish</em></h2>
+    <p class="lede">A receipt photographed on WhatsApp, read, checked against a written
+      policy, and answered in the same thread &mdash; in about a minute.</p>
+
+    <div class="demo">
+      <div>
+        <button class="player" id="demoPlayer" type="button"
+                aria-label="Play the Expenze demo film, 1 minute 30 seconds">
+          <img src="demo-poster.jpg" width="960" height="540" loading="lazy"
+               alt="A WhatsApp thread showing a receipt sent to Expenze and the audited outcome returned">
+          <span class="play">
+            <span><svg viewBox="0 0 13 15" aria-hidden="true"><path d="M0 0l13 7.5L0 15z"/></svg>Watch &mdash; 1:30</span>
+          </span>
+        </button>
+        <p class="runtime">Mobil80-Exp-208 &middot; Trent Hypermarket &middot; INR 354.00 &middot; audited 28 Oct 2026</p>
+      </div>
+
+      <ul>
+        <li><b>0:16</b> &mdash; the receipt arrives on WhatsApp, and a claim reference comes back</li>
+        <li><b>0:45</b> &mdash; the same outcome by email, at the same minute</li>
+        <li><b>0:50</b> &mdash; the console: what cleared on its own, and the rule it passed</li>
+        <li><b>1:14</b> &mdash; the one claim that needed a person, and who decided it</li>
+      </ul>
     </div>
   </section>
 
@@ -719,6 +794,25 @@ curl -X POST $EXPENZE_BASE_URL/intake/api \
 
 <script>
 "use strict";
+
+/* ---------- demo film ----------
+ *
+ * The poster becomes a player on click, and not before. youtube-nocookie.com
+ * so that somebody who never presses play is never given a cookie, and
+ * autoplay=1 because they have already told us what they want by clicking.
+ */
+const demoPlayer = document.getElementById("demoPlayer");
+if (demoPlayer) {
+  demoPlayer.addEventListener("click", () => {
+    const frame = document.createElement("iframe");
+    frame.src = "https://www.youtube-nocookie.com/embed/P77NAE7ftl4?autoplay=1&rel=0&modestbranding=1";
+    frame.title = "Expenze - a real claim, start to finish";
+    frame.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture";
+    frame.referrerPolicy = "strict-origin-when-cross-origin";
+    frame.allowFullscreen = true;
+    demoPlayer.replaceWith(frame);
+  }, { once: true });
+}
 
 const AUTH_API = "https://0w1qn4vso1.execute-api.ap-southeast-1.amazonaws.com/poc/auth";
 
