@@ -98,6 +98,7 @@ body { background:var(--paper); color:var(--ink); font-family:"Archivo",ui-sans-
 
 /* masthead + identity */
 .masthead { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:space-between; gap:10px 24px; padding-bottom:10px; border-bottom:2px solid var(--ink); }
+.brand h1 .mark { width:26px; height:26px; vertical-align:-4px; margin-right:9px; }
 .brand h1 { margin:0; font-size:clamp(1.4rem,1.25rem + .85vw,1.8rem); font-weight:700; letter-spacing:-.022em; }
 .brand p { margin:2px 0 0; color:var(--muted); font-size:.78rem; line-height:1.4; max-width:64ch; }
 .sessionwrap { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
@@ -1556,7 +1557,7 @@ footer.note strong { color:var(--ink-2); font-weight:600; }
 
   <header class="masthead">
     <div class="brand">
-      <h1>Expenze</h1>
+      <h1><img class="mark" src="/logo.svg" width="26" height="26" alt="">Expenze</h1>
       <p>expenze.ai &middot; receipts in by WhatsApp, email, this portal or API. The agent clears what policy allows and queues the rest for a named human.</p>
     </div>
     <div class="sessionwrap">

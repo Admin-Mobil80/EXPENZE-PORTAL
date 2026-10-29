@@ -174,6 +174,10 @@ h2 em { font-style:italic; color:var(--navy); }
   display:flex; align-items:center; justify-content:space-between;
   gap:18px; padding:18px 0; flex-wrap:wrap;
 }
+/* The mark sits with the wordmark rather than replacing it: at 26 px the
+   tile is recognisable and the name is still readable, which is the job a
+   header lockup actually has. */
+.logo .mark { width:26px; height:26px; align-self:center; margin-right:9px; flex:none; }
 .logo {
   display:flex; align-items:baseline; gap:1px; text-decoration:none; color:var(--ink);
   font-family:"Instrument Serif",Georgia,serif; font-size:1.6rem; letter-spacing:-.01em;
@@ -404,7 +408,7 @@ footer .who { font-family:"IBM Plex Mono",monospace; font-size:.73rem; color:var
 <div class="wrap">
 
   <div class="topbar">
-    <a class="logo" href="/">Expenze<span class="dot">.</span><span class="tld">expenze.ai</span></a>
+    <a class="logo" href="/"><img class="mark" src="/logo.svg" width="26" height="26" alt="">Expenze<span class="dot">.</span><span class="tld">expenze.ai</span></a>
     <nav class="topnav">
       <a href="#demo">Demo</a>
       <a href="#how">How it works</a>
